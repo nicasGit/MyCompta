@@ -48,7 +48,7 @@ function createApp(store = new GoogleStore()) {
     res.clearCookie('oauth_state', { path: '/auth' });
     if (!valid || typeof code !== 'string') return res.redirect('/?error=oauth');
     try { await store.exchangeCode(code); res.redirect('/'); }
-    catch { res.redirect('/?error=connexion'); }
+    catch (error) { res.redirect(error.status === 409 ? '/?error=compte' : '/?error=connexion'); }
   });
   app.post('/api/setup', async (req, res) => res.json(await serialize(() => store.initialize())));
   app.post('/api/disconnect', async (req, res) => { await serialize(() => store.disconnect()); res.json({ ok: true }); });

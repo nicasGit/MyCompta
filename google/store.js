@@ -39,13 +39,14 @@ class GoogleStore {
     const [token, resources] = await Promise.all([this.load('token'), this.load('resources')]);
     return { configured: this.configured, connected: Boolean(token.refresh_token || token.access_token),
       ready: Boolean(resources.spreadsheetId && resources.folderId),
+      user: token.user ? { name: token.user.name, email: token.user.email } : null,
       sheetUrl: resources.spreadsheetId ? `https://docs.google.com/spreadsheets/d/${resources.spreadsheetId}/edit` : null,
       driveUrl: resources.folderId ? `https://drive.google.com/drive/folders/${resources.folderId}` : null };
   }
   authorizationUrl(state) {
     return 'https://accounts.google.com/o/oauth2/v2/auth?' + new URLSearchParams({
       client_id: this.clientId, redirect_uri: this.redirect, response_type: 'code',
-      scope: 'https://www.googleapis.com/auth/drive.file', access_type: 'offline', prompt: 'consent', state,
+      scope: 'openid email profile https://www.googleapis.com/auth/drive.file', access_type: 'offline', prompt: 'consent select_account', state,
     });
   }
   async tokenRequest(fields) {
@@ -61,7 +62,16 @@ class GoogleStore {
   async exchangeCode(code) {
     const token = await this.tokenRequest({ code, grant_type: 'authorization_code', redirect_uri: this.redirect });
     if (!token.scope?.split(' ').includes('https://www.googleapis.com/auth/drive.file')) throw fail('Autorisez l’accès aux fichiers MyCompta dans Google.', 401);
-    await this.save('token', { ...token, expires_at: Date.now() + token.expires_in * 1000 });
+    const response = await this.fetch('https://openidconnect.googleapis.com/v1/userinfo', {
+      headers: { Authorization: `Bearer ${token.access_token}` }, signal: AbortSignal.timeout(30000),
+    });
+    if (!response.ok) throw fail('Impossible de vérifier le compte Google. Réessayez la connexion.', 401);
+    const profile = await response.json();
+    if (!profile.sub || !profile.email || profile.email_verified !== true) throw fail('Le compte Google doit disposer d’une adresse e-mail vérifiée.', 401);
+    const resources = await this.load('resources');
+    if (resources.ownerId && resources.ownerId !== profile.sub) throw fail('Cet espace appartient à un autre compte Google. Reconnectez le compte utilisé lors de sa création.', 409);
+    const user = { id: profile.sub, name: String(profile.name || profile.email), email: String(profile.email) };
+    await this.save('token', { ...token, user, expires_at: Date.now() + token.expires_in * 1000 });
   }
   async accessToken() {
     const token = await this.load('token');
@@ -106,6 +116,8 @@ class GoogleStore {
   async initialize() {
     if (!this.configured) throw fail('Configurez les identifiants Google dans .env.');
     const resources = await this.load('resources');
+    const token = await this.load('token');
+    if (resources.ownerId && resources.ownerId !== token.user?.id) throw fail('Reconnectez le compte propriétaire de cet espace.', 409);
     if (!resources.folderId) {
       const folder = await this.findFile('folder') || await this.json('https://www.googleapis.com/drive/v3/files', 'POST', {
         name: 'MyCompta · Documents', mimeType: 'application/vnd.google-apps.folder', appProperties: { mycompta: 'folder' },
@@ -138,11 +150,16 @@ class GoogleStore {
     }
     if (requests.length) await this.json(base + ':batchUpdate', 'POST', { requests });
     await this.read();
+    if (token.user?.id) { resources.ownerId = token.user.id; await this.save('resources', resources); }
     return this.status();
   }
   async context() {
     const resources = await this.load('resources');
     if (!resources.spreadsheetId || !resources.folderId) throw fail('Créez d’abord votre espace Google MyCompta.', 409);
+    if (resources.ownerId) {
+      const token = await this.load('token');
+      if (resources.ownerId !== token.user?.id) throw fail('Reconnectez le compte propriétaire de cet espace.', 409);
+    }
     return { ...resources, base: `https://sheets.googleapis.com/v4/spreadsheets/${resources.spreadsheetId}` };
   }
   async read() {

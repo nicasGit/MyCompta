@@ -67,7 +67,7 @@ test('Drive and Sheets use the narrow file scope, atomic imports and literal cel
     throw new Error('Unexpected request: ' + url);
   });
   const auth = new URL(store.authorizationUrl('state'));
-  assert.equal(auth.searchParams.get('scope'), 'https://www.googleapis.com/auth/drive.file');
+  assert.deepEqual(auth.searchParams.get('scope').split(' '), ['openid', 'email', 'profile', 'https://www.googleapis.com/auth/drive.file']);
   assert.equal(auth.searchParams.get('access_type'), 'offline');
   await store.appendImport({ id: 'doc', name: '=HYPERLINK("evil")' }, [operation({ label: '=IMPORTXML("evil")' })]);
   assert.equal(batch.requests.length, 2);
@@ -103,6 +103,30 @@ test('expired tokens refresh once for concurrent Google requests', async t => {
   assert.deepEqual(await Promise.all([store.accessToken(), store.accessToken()]), ['renewed', 'renewed']);
   assert.equal(count, 1);
   assert.equal((await store.load('token')).refresh_token, 'refresh');
+});
+
+test('Google identity is verified and returned without exposing credentials', async t => {
+  const store = await withStore(t, async url => {
+    if (url.endsWith('/token')) return json({ access_token: 'secret-access', refresh_token: 'secret-refresh', expires_in: 3600, scope: 'openid email profile https://www.googleapis.com/auth/drive.file' });
+    assert.equal(url, 'https://openidconnect.googleapis.com/v1/userinfo');
+    return json({ sub: 'owner', name: 'Foyer Test', email: 'foyer@example.test', email_verified: true });
+  });
+  await store.exchangeCode('test-code');
+  const status = await store.status();
+  assert.deepEqual(status.user, { name: 'Foyer Test', email: 'foyer@example.test' });
+  assert.ok(!JSON.stringify(status).includes('secret-'));
+  await store.save('resources', { folderId: 'folder', spreadsheetId: 'sheet', ownerId: 'other-owner' });
+  await assert.rejects(() => store.exchangeCode('another-code'), /autre compte/);
+  await assert.rejects(() => store.context(), /propriétaire/);
+  assert.equal((await store.load('token')).user.id, 'owner');
+});
+
+test('unverified Google identity never replaces the stored connection', async t => {
+  const store = await withStore(t, async url => url.endsWith('/token')
+    ? json({ access_token: 'new-token', expires_in: 3600, scope: 'https://www.googleapis.com/auth/drive.file' })
+    : json({ sub: 'owner', email: 'foyer@example.test', email_verified: false }));
+  await assert.rejects(() => store.exchangeCode('test-code'), /vérifiée/);
+  assert.equal((await store.load('token')).access_token, 'test-token');
 });
 
 test('setup initializes missing tabs without colliding with default tab, then runs idempotently', async t => {

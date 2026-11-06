@@ -119,7 +119,11 @@ function render() {
     return `<div class="budget-row"><div><strong>${esc(b.category)}</strong><span>${esc(money(spent))} / ${esc(money(b.amount))}</span></div><progress value="${Math.min(spent, b.amount)}" max="${Math.max(b.amount, 1)}" aria-label="Budget ${esc(b.category)}"></progress><small>${spent > b.amount ? 'Dépassement de ' + esc(money(spent - b.amount)) : 'Reste disponible : ' + esc(money(b.amount - spent))}</small></div>`;
   }).join('') || empty('À chaque catégorie, son budget', 'Ajoutez une enveloppe mensuelle pour commencer.');
   const s = state.status;
+  $('#google-account').textContent = s.connected ? (s.user?.name || 'Google connecté') : 'Connecter Google';
+  $('#google-account').title = s.user?.email || 'Gérer la connexion Google';
+  $('#google-account').classList.toggle('connected', Boolean(s.connected));
   $('#connection-state').innerHTML = `<div class="banner">${!s.configured ? 'Configuration Google à compléter. Suivez les étapes ci-dessous.' : !s.connected ? 'Configuration prête. Connectez votre compte Google.' : !s.ready ? 'Google est connecté. Créez votre espace pour commencer.' : 'Espace configuré. Votre tableur et votre dossier sont prêts.'}</div>`;
+  if (s.connected && s.user) $('#connection-state').insertAdjacentHTML('afterbegin', `<div class="account-card"><span class="account-avatar">${esc((s.user.name || s.user.email).slice(0, 1).toUpperCase())}</span><div><strong>${esc(s.user.name)}</strong><span>${esc(s.user.email)}</span></div><span class="chip">Compte connecté</span></div>`);
   $('#connect').hidden = s.connected;
   $('#connect').classList.toggle('disabled', !s.configured);
   $('#connect').setAttribute('aria-disabled', String(!s.configured));
@@ -215,5 +219,5 @@ $('#demo').onclick = () => {
 };
 $('#exit-demo').onclick = () => { state.demo = false; action(load); };
 const errorCode = new URLSearchParams(location.search).get('error');
-if (errorCode) { message(errorCode === 'configuration' ? 'Renseignez la configuration Google avant de vous connecter.' : 'La connexion Google n’a pas abouti. Vérifiez les autorisations, le client OAuth et l’URI de redirection, puis réessayez.', true); history.replaceState(null, '', '/'); showView('settings'); }
+if (errorCode) { message(errorCode === 'configuration' ? 'Renseignez la configuration Google avant de vous connecter.' : errorCode === 'compte' ? 'Cet espace appartient à un autre compte Google. Reconnectez le compte utilisé pour créer votre espace MyCompta.' : 'La connexion Google n’a pas abouti. Vérifiez les autorisations, le client OAuth et l’URI de redirection, puis réessayez.', true); history.replaceState(null, '', '/'); showView('settings'); }
 action(load);
