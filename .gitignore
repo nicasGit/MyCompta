@@ -1,0 +1,36 @@
+# Node
+node_modules/
+
+#old
+old/
+*old
+
+# Node portable
+node-v24.16.0-win-x64/
+
+# OAuth / Google
+oauth-token.json
+google-user.json
+service-account.json
+
+
+#Setting 
+appsettings.json
+data/
+
+# Uploads
+uploads/
+aCharger/
+
+# Archives
+*.zip
+
+# Logs
+*.log
+
+# Documents de test
+*.pdf
+*.docx
+
+# Config locale
+.env

@@ -1,0 +1,10 @@
+{
+  "version": "2.0.0",
+  "tasks": [
+    {
+      "label": "Lancer MyCompta",
+      "type": "shell",
+      "command": "start chrome http://localhost:3001 ; node server.js"
+    }
+  ]
+}
