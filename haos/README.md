@@ -1,34 +1,27 @@
 # Add-on HAOS MyCompta
 
-Ce dossier regroupe les fichiers destinés à Home Assistant OS :
+Le code reste dans [MyCompta](https://github.com/nicasGit/MyCompta). Le dépôt [comptainf-addon](https://github.com/nicasGit/comptainf-addon) peut héberger les deux add-ons :
 
-```text
-haos/
-  prepare.js              Script de préparation du paquet
-  repository.yaml         Informations du dépôt NJOSoftware
-  mycompta/
-    config.yaml           Configuration de l’add-on
-    Dockerfile            Construction de l’image
-    .dockerignore         Exclusions du contexte Docker
-    addon.js              Chargement des options HAOS
-    DOCS.md               Installation et configuration
-    app/                  Code de l’application, généré automatiquement
-```
+    comptainf-addon/
+      repository.yaml
+      comptainf/
+      mycompta/
+        config.yaml
+        Dockerfile
+        .dockerignore
+        addon.js
+        DOCS.md
 
-## Préparer le paquet
+## Publication et installation
 
-Depuis la racine du projet MyCompta :
+Publier le petit dossier [mycompta/](./mycompta/) à la racine du dépôt d'add-ons, à côté de comptainf/. Aucun code applicatif ni dossier app/ n'est à copier. [repository.yaml](./repository.yaml) reprend les informations NJOSoftware du dépôt existant ; son fichier actuel peut rester inchangé.
 
-```powershell
-npm run addon:prepare
-```
+Dans la boutique Home Assistant, ajouter **https://github.com/nicasGit/comptainf-addon**. Une adresse contenant /tree/main/haos désigne une page GitHub et ne peut pas être clonée. Si le dépôt est déjà ajouté, actualiser la boutique après publication de mycompta/.
 
-Le script reconstruit [mycompta/app/](./mycompta/app/) avec les seuls fichiers nécessaires à l’exécution. Il exclut les secrets, les données, les PDF, les archives et `node_modules`. Ce dossier généré n’est pas versionné dans le dépôt de l’application. Relancer la commande après toute modification du code et avant de copier ou publier le paquet.
+## Sources et mises à jour
 
-## Réutiliser le dépôt existant
+Le [Dockerfile](./mycompta/Dockerfile) consulte le dernier commit de main, récupère exactement ce commit et installe les dépendances. L'image finale contient uniquement les fichiers nécessaires à l'exécution. Le code doit donc être poussé dans le dépôt MyCompta avant la construction. HAOS doit pouvoir accéder à Internet et le dépôt doit être public.
 
-[repository.yaml](./repository.yaml) reprend à l’identique le nom, l’URL et le mainteneur du [dépôt ComptaInf](https://github.com/nicasGit/comptainf-addon/blob/main/repository.yaml). Après préparation, copier **mycompta/** dans ce dépôt, à côté de son dossier **comptainf/**. Le fichier de dépôt déjà présent peut rester tel quel. Le code généré **mycompta/app/** doit être inclus lors de cette copie : Home Assistant construit l’image depuis le dossier de l’add-on et ne lit pas les sources de l’application situées ailleurs.
+Pour distribuer une mise à jour : pousser le code MyCompta, augmenter la version dans [config.yaml](./mycompta/config.yaml), puis publier cette modification dans le dépôt d'add-ons. Home Assistant proposera une mise à jour et construira une nouvelle image. Une reconstruction manuelle récupère aussi les dernières sources ; un simple redémarrage conserve l'image installée. Deux constructions de la même version peuvent utiliser des commits différents puisque main évolue.
 
-Pour un autre dépôt GitHub, adapter l’URL de `repository.yaml` à sa véritable adresse. Ce fichier doit être à la racine du dépôt d’add-ons publié ; les dossiers `mycompta/` et `comptainf/` y sont des dossiers voisins. Le dossier `haos/` du projet sert de paquet à exporter, pas d’URL de dépôt à ajouter directement dans Home Assistant.
-
-Aucun contenu du dépôt distant n’est modifié ou publié par la préparation. Pour les options HAOS, OAuth, le proxy HTTPS et la reprise des données, voir le [guide de l’add-on](./mycompta/DOCS.md).
+Ces modifications locales ne publient rien sur GitHub. Voir [DOCS.md](./mycompta/DOCS.md) pour Google OAuth, le proxy HTTPS et la reprise des données.
