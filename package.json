@@ -5,7 +5,8 @@
   "main": "server.js",
   "scripts": {
     "test": "node --test",
-    "start": "node server.js"
+    "start": "node server.js",
+    "addon:prepare": "node haos/prepare.js"
   },
   "engines": { "node": ">=22.13.0" },
   "keywords": [],

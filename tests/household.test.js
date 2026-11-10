@@ -6,7 +6,7 @@ const { Household } = require('../services/household');
 const { runtimeConfig } = require('../services/config');
 const { GoogleStore } = require('../google/store');
 const { createApp } = require('../app');
-const { configureAddon } = require('../addon');
+const { configureAddon } = require('../haos/mycompta/addon');
 const owner = { id: 'owner-id', email: 'owner@example.test', name: 'Propriétaire' };
 const member = { id: 'member-id', email: 'member@example.test', name: 'Membre' };
 function memoryStore() {

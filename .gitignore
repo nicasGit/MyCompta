@@ -34,3 +34,6 @@ aCharger/
 
 # Config locale
 .env
+
+# Runtime staged for the standalone HAOS build context
+/haos/mycompta/app/

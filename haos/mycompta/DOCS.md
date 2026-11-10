@@ -1,10 +1,12 @@
 # MyCompta sur Home Assistant OS
 
+Ce dossier est le contexte de construction de l’add-on. Depuis la racine du projet MyCompta, lancer `npm run addon:prepare` après chaque modification du code, puis copier tout ce dossier, y compris `app/`, vers HAOS ou le dépôt d’add-ons. Le dossier `app/` est généré : ne pas le modifier à la main.
+
 Cet add-on exécute une seule instance de MyCompta pour tout le foyer, sur amd64 ou aarch64. L’interface utilise une URL HTTPS dédiée derrière votre proxy inverse ; l’Ingress Home Assistant n’est pas activé. Les fichiers financiers restent dans le Sheets et le Drive du propriétaire. Les membres accèdent aux documents par MyCompta, sans obtenir les jetons Google du propriétaire ni nécessiter un compte de service.
 
 ## Installation locale sur HAOS
 
-1. Copier ce projet dans `/addons/mycompta/` sur HAOS, avec notamment `config.yaml`, `Dockerfile`, `addon.js`, les fichiers npm et les dossiers de l’application. Ne pas copier `.env`, `node_modules`, les archives ni les documents personnels.
+1. Depuis la racine du projet, exécuter `npm run addon:prepare`. Copier ensuite **le contenu de `haos/mycompta/`** dans `/addons/mycompta/` sur HAOS. Il contient `config.yaml`, `Dockerfile`, `addon.js` et le dossier généré `app/`. Ne pas copier la racine du projet ni ses données privées. Pour une installation via le dépôt existant, copier ce même dossier `mycompta/` à côté de `comptainf/` dans le dépôt d’add-ons, sans modifier ce dernier.
 2. Dans **Paramètres → Applications / Modules complémentaires → Boutique**, actualiser les applications locales puis installer **MyCompta**. Le nom des menus dépend de votre version de Home Assistant.
 3. Configurer un proxy inverse HTTPS pointant vers le port HTTP interne **3001** de l’add-on. Utiliser un nom de domaine tel que `https://compta.votre-domaine.fr`, à la racine, sans sous-chemin. Conserver l’en-tête `Host` de cette URL. Le certificat doit être reconnu par les appareils des membres. Le port 3001 reste destiné au proxy ou au réseau privé ; ne pas l’exposer directement sur Internet.
 4. Renseigner les options de l’add-on :
