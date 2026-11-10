@@ -1,0 +1,147 @@
+const { test } = require('node:test');
+const assert = require('node:assert/strict');
+const { once } = require('node:events');
+const http = require('node:http');
+const { Household } = require('../services/household');
+const { runtimeConfig } = require('../services/config');
+const { GoogleStore } = require('../google/store');
+const { createApp } = require('../app');
+const { configureAddon } = require('../addon');
+const owner = { id: 'owner-id', email: 'owner@example.test', name: 'Propriétaire' };
+const member = { id: 'member-id', email: 'member@example.test', name: 'Membre' };
+function memoryStore() {
+  const files = {};
+  return { files, load: async name => structuredClone(files[name] || {}), save: async (name, value) => { files[name] = structuredClone(value); } };
+}
+test('household bootstrap, explicit membership, persistent hashed sessions and revocation', async () => {
+  const storage = memoryStore();
+  const household = new Household(storage, owner.email);
+  await assert.rejects(() => household.login(member), /créer le foyer/);
+  const first = await household.login(owner);
+  assert.equal(first.user.role, 'owner');
+  assert.equal((await new Household(storage, 'other@example.test').authenticate(first.session)).email, owner.email);
+  assert.ok(!JSON.stringify(storage.files.sessions).includes(first.session));
+  await assert.rejects(() => household.login(member), /pas membre/);
+  await household.add('MEMBER@example.test');
+  await assert.rejects(() => household.add(member.email), /déjà/);
+  const login = await household.login(member);
+  assert.equal(login.user.role, 'member');
+  assert.equal((await household.authenticate(login.session)).id, member.id);
+  await household.logout(login.session);
+  assert.equal(await household.authenticate(login.session), null);
+  const second = await household.login(member);
+  const registered = (await household.list()).members[0];
+  await household.remove(registered.id);
+  assert.equal(await household.authenticate(second.session), null);
+  assert.equal((await household.authenticate(first.session)).role, 'owner');
+  await assert.rejects(() => household.login(member), /pas membre/);
+});
+test('an existing owner cannot be replaced through a new bootstrap email', async () => {
+  const storage = memoryStore();
+  storage.files.token = { user: owner };
+  const household = new Household(storage, member.email);
+  await assert.rejects(() => household.login(member), /pas membre/);
+  assert.equal((await household.login(owner)).user.id, owner.id);
+});
+test('network configuration requires HTTPS and cannot expose the old local mode', () => {
+  assert.throws(() => runtimeConfig({ LISTEN_HOST: '0.0.0.0' }), /MULTI_USER/);
+  assert.throws(() => runtimeConfig({ MULTI_USER: 'true', APP_URL: 'http://ha.local:3001' }), /HTTPS/);
+  assert.throws(() => runtimeConfig({ APP_URL: 'https://example.test/subpath' }), /sans chemin/);
+  const env = {};
+  configureAddon(env, () => JSON.stringify({ app_url: 'https://compta.example.test', owner_email: owner.email, google_client_id: 'test-client', google_client_secret: 'secret' }));
+  assert.equal(env.MULTI_USER, 'true');
+  assert.equal(env.DATA_DIR, '/data');
+  assert.equal(runtimeConfig(env).secure, true);
+  assert.throws(() => configureAddon({}, () => '{}'), /Option obligatoire/);
+});
+test('shared HTTP application isolates users, protects owner actions and preserves authors', async t => {
+  const env = { MULTI_USER: 'true', APP_URL: 'https://compta.example.test', OWNER_EMAIL: owner.email, GOOGLE_CLIENT_ID: 'test-client', GOOGLE_CLIENT_SECRET: 'secret' };
+  const store = new GoogleStore({ env, fetchImpl: async () => { throw new Error('No real Google requests'); } });
+  const storage = memoryStore();
+  store.load = storage.load; store.save = storage.save;
+  storage.files.resources = { ownerId: owner.id, folderId: 'folder', spreadsheetId: 'sheet' };
+  const data = { documents: [{ id: 'doc', driveId: 'pdf', name: 'Cembra.pdf', createdBy: owner.email }], operations: [], suppliers: [], budgets: [] };
+  store.read = async () => structuredClone(data);
+  store.downloadPdf = async () => Buffer.from('%PDF-fixture');
+  const scopes = [];
+  store.authenticateCode = async (code, drive) => {
+    scopes.push({ code, drive });
+    const user = code === 'owner' ? owner : code === 'member' ? member : { id: 'stranger-id', email: 'stranger@example.test', name: 'Inconnu' };
+    return { user, access_token: code + '-private-token', refresh_token: code + '-private-refresh', expires_at: Date.now() + 3600000 };
+  };
+  store.writeRow = async (table, value) => {
+    assert.equal(table, 'Operations');
+    const index = data.operations.findIndex(o => o.id === value.id);
+    if (index < 0) data.operations.push(value); else data.operations[index] = value;
+    return value;
+  };
+  const server = createApp(store, runtimeConfig(env)).listen(0, '127.0.0.1');
+  t.after(() => { server.closeAllConnections(); server.close(); });
+  await once(server, 'listening');
+  const base = `http://127.0.0.1:${server.address().port}`;
+  const request = (path, session, method = 'GET', body, origin = env.APP_URL) => new Promise((resolve, reject) => {
+    const req = http.request(base + path, { method, headers: { Host: 'compta.example.test', ...(session ? { Cookie: session } : {}), ...(method !== 'GET' ? { Origin: origin, 'X-MyCompta': '1', 'Content-Type': 'application/json' } : {}) } }, res => {
+      const chunks = [];
+      res.on('data', c => chunks.push(c));
+      res.on('end', () => {
+        const headers = new Headers();
+        for (const [name, value] of Object.entries(res.headers)) for (const item of Array.isArray(value) ? value : [value]) if (item != null) headers.append(name, item);
+        resolve(new Response(Buffer.concat(chunks), { status: res.statusCode, headers }));
+      });
+    });
+    req.on('error', reject); req.end(body ? JSON.stringify(body) : undefined);
+  });
+  const login = async code => {
+    const start = await request('/auth/google');
+    const state = new URL(start.headers.get('location')).searchParams.get('state');
+    const cookie = start.headers.getSetCookie().find(c => c.startsWith('oauth_state=')).split(';')[0];
+    const response = await request('/auth/callback?code=' + code + '&state=' + state, cookie);
+    const session = response.headers.getSetCookie().find(c => c.startsWith('mycompta_session='));
+    if (session) { assert.match(session, /HttpOnly/); assert.match(session, /Secure/); }
+    return { response, session: session?.split(';')[0] };
+  };
+  assert.equal((await request('/api/data')).status, 401);
+  assert.equal((await request('/API/data')).status, 404);
+  assert.equal((await request('/API/operations', null, 'POST', { label: 'unauthorized' })).status, 404);
+  const anonymous = await (await request('/api/status')).json();
+  assert.equal(anonymous.user, null);
+  assert.ok(!JSON.stringify(anonymous).includes(owner.email));
+  const ownerLogin = await login('owner');
+  assert.ok(ownerLogin.session);
+  let response = await request('/api/household/members', ownerLogin.session, 'POST', { email: member.email }, 'https://evil.test');
+  assert.equal(response.status, 403);
+  response = await request('/api/household/members', ownerLogin.session, 'POST', { email: member.email });
+  assert.equal(response.status, 201);
+  const memberId = (await response.json()).members[0].id;
+  const denied = await login('stranger');
+  assert.equal(denied.response.headers.get('location'), '/?error=nonmembre');
+  assert.equal(denied.session, undefined);
+  const memberLogin = await login('member');
+  assert.ok(memberLogin.session);
+  assert.equal(scopes.find(s => s.code === 'member').drive, false);
+  assert.equal(storage.files.token.access_token, 'owner-private-token');
+  const status = await (await request('/api/status', memberLogin.session)).json();
+  assert.equal(status.user.email, member.email);
+  assert.equal(status.sheetUrl, null);
+  assert.equal(status.driveUrl, null);
+  assert.ok(!JSON.stringify(status).includes('private-token'));
+  assert.equal((await request('/api/data', memberLogin.session)).status, 200);
+  response = await request('/api/documents/doc/pdf', memberLogin.session);
+  assert.equal(await response.text(), '%PDF-fixture');
+  assert.match(response.headers.get('content-type'), /application\/pdf/);
+  for (const path of ['/api/setup', '/api/disconnect', '/api/household/members']) assert.equal((await request(path, memberLogin.session, 'POST', { email: 'third@example.test' })).status, 403);
+  assert.equal((await request('/auth/google?drive=1', memberLogin.session)).status, 403);
+  const op = { date: '2026-11-02', label: 'Courses', amount: 25, currency: 'CHF', category: 'Alimentation', type: 'expense', status: 'validated', createdBy: owner.email };
+  response = await request('/api/operations', memberLogin.session, 'POST', op);
+  assert.equal(response.status, 201);
+  const saved = await response.json();
+  assert.equal(saved.createdBy, member.email);
+  response = await request('/api/operations/' + saved.id, ownerLogin.session, 'PUT', { ...saved, createdBy: owner.email, amount: 30 });
+  assert.equal((await response.json()).createdBy, member.email);
+  assert.equal((await request('/api/logout', memberLogin.session, 'POST')).status, 200);
+  assert.equal((await request('/api/data', memberLogin.session)).status, 401);
+  const second = await login('member');
+  assert.equal((await request('/api/household/members/' + memberId, ownerLogin.session, 'DELETE')).status, 200);
+  assert.equal((await request('/api/data', second.session)).status, 401);
+  assert.equal((await request('/api/data', ownerLogin.session)).status, 200);
+});

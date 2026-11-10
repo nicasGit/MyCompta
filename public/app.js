@@ -8,6 +8,7 @@ const categories = ['À catégoriser', 'Logement', 'Alimentation', 'Transports',
 const labels = { pending: 'Incluse', validated: 'Incluse', ignored: 'Ignorée' };
 const typeLabels = { expense: 'Dépense', income: 'Revenu / remboursement', transfer: 'Virement', card_payment: 'Règlement de carte' };
 titles.suppliers = ['Fournisseurs et catégories', 'Le bon classement, automatiquement.'];
+titles.household = ['Mon foyer', 'Un espace commun, une connexion pour chacun.'];
 state.editingSupplier = null;
 $('#month').value = today().slice(0, 7);
 $('#redirect-uri').textContent = `${location.origin}/auth/callback`;
@@ -53,8 +54,13 @@ function showView(view) {
 }
 document.addEventListener('click', event => {
   const nav = event.target.closest('[data-view]');
-  if (nav) showView(nav.dataset.view);
+  if (nav) { showView(nav.dataset.view); if (nav.dataset.view === 'household') action(loadHousehold); }
   const edit = event.target.closest('[data-edit]');
+  const removeMember = event.target.closest('[data-remove-member]');
+  if (removeMember && window.confirm('Retirer cette personne du foyer et bloquer ses sessions ?')) action(async () => {
+    await api('/api/household/members/' + encodeURIComponent(removeMember.dataset.removeMember), { method: 'DELETE' });
+    await loadHousehold();
+  }, 'Membre retiré du foyer.');
   if (edit) editOperation(state.data.operations.find(o => o.id === edit.dataset.edit));
   const supplierEdit = event.target.closest('[data-edit-supplier]');
   if (supplierEdit) editSupplier(supplierEdit.dataset.editSupplier);
@@ -90,6 +96,7 @@ $('#add-operation').onclick = () => editOperation();
 function empty(title, detail = '') { return `<div class="empty"><span>◌</span><strong>${esc(title)}</strong>${esc(detail)}</div>`; }
 function pdfUrl(document, page = 0) {
   if (!document || !/^[\w-]+$/.test(document.driveId || '')) return null;
+  if (state.status.multiUser) return `/api/documents/${encodeURIComponent(document.id)}/pdf${page ? '#page=' + Number(page) : ''}`;
   return `https://drive.google.com/file/d/${encodeURIComponent(document.driveId)}/view${page ? '#page=' + Number(page) : ''}`;
 }
 function docRows(documents, compact = false) {
@@ -101,12 +108,12 @@ function docRows(documents, compact = false) {
     const operations = state.data.operations.filter(o => o.documentId === d.id);
     const pending = operations.filter(o => o.status !== 'ignored' && o.category === 'À catégoriser').length;
     const status = operations.length ? (pending ? `${pending} à catégoriser` : 'Traité') : 'Saisie nécessaire';
-    return `<div class="document-row"><span class="pdf-icon">PDF</span><div class="document-info"><strong>${url ? `<a href="${esc(url)}" target="_blank" rel="noopener noreferrer">${esc(d.name)} ↗</a>` : esc(d.name)}</strong><small>${esc(d.source)} · ${esc(new Date(d.importedAt).toLocaleDateString('fr-CH'))} · ${operations.length} opération(s)</small>${!compact && d.note ? `<p>${esc(d.note)}</p>` : ''}${reanalyse}</div><span class="badge ${pending ? '' : operations.length ? 'validated' : ''}">${esc(status)}</span></div>`;
+    return `<div class="document-row"><span class="pdf-icon">PDF</span><div class="document-info"><strong>${url ? `<a href="${esc(url)}" target="_blank" rel="noopener noreferrer">${esc(d.name)} ↗</a>` : esc(d.name)}</strong><small>${esc(d.source)} · ${esc(new Date(d.importedAt).toLocaleDateString('fr-CH'))} · ${operations.length} opération(s)${d.createdBy ? " · Ajouté par " + esc(d.createdBy) : ""}</small>${!compact && d.note ? `<p>${esc(d.note)}</p>` : ''}${reanalyse}</div><span class="badge ${pending ? '' : operations.length ? 'validated' : ''}">${esc(status)}</span></div>`;
   }).join('');
 }
 function operationTable(operations) {
   if (!operations.length) return empty('Aucune opération à afficher', 'Les lignes importées apparaîtront ici.');
-  return `<table><thead><tr><th>Date</th><th>Libellé / compte</th><th>Titulaire</th><th>Catégorie</th><th>État</th><th class="amount">Montant</th><th></th></tr></thead><tbody>${operations.map(o => `<tr><td>${esc(o.date.split('-').reverse().join('.'))}</td><td class="label-cell" title="${esc(o.label)}">${esc(o.label)}<span class="subtext">${esc(o.account)} · ${esc(typeLabels[o.type] || o.type)}</span></td><td>${esc(o.holder || "Non renseigné")}<span class="subtext">${esc(o.cardLast4 ? "Carte " + o.cardLast4 : "")}</span></td><td>${esc(o.category)}</td><td><span class="badge ${esc(o.status)}">${esc(o.status !== "ignored" && o.category === "À catégoriser" ? "À catégoriser" : labels[o.status] || o.status)}</span></td><td class="amount">${esc(money(o.amount, o.currency))}</td><td><button class="text-button" data-edit="${esc(o.id)}">Modifier →</button></td></tr>`).join('')}</tbody></table>`;
+  return `<table><thead><tr><th>Date</th><th>Libellé / compte</th><th>Titulaire</th><th>Catégorie</th><th>État</th><th>Ajouté par</th><th class="amount">Montant</th><th></th></tr></thead><tbody>${operations.map(o => `<tr><td>${esc(o.date.split('-').reverse().join('.'))}</td><td class="label-cell" title="${esc(o.label)}">${esc(o.label)}<span class="subtext">${esc(o.account)} · ${esc(typeLabels[o.type] || o.type)}</span></td><td>${esc(o.holder || "Non renseigné")}<span class="subtext">${esc(o.cardLast4 ? "Carte " + o.cardLast4 : "")}</span></td><td>${esc(o.category)}</td><td><span class="badge ${esc(o.status)}">${esc(o.status !== "ignored" && o.category === "À catégoriser" ? "À catégoriser" : labels[o.status] || o.status)}</span></td><td>${esc(o.createdBy || "—")}</td><td class="amount">${esc(money(o.amount, o.currency))}</td><td><button class="text-button" data-edit="${esc(o.id)}">Modifier →</button></td></tr>`).join('')}</tbody></table>`;
 }
 function renderOperations() {
   const month = $('#month').value;
@@ -156,17 +163,26 @@ function render() {
   $('#connect').hidden = s.connected;
   $('#connect').classList.toggle('disabled', !s.configured);
   $('#connect').setAttribute('aria-disabled', String(!s.configured));
-  $('#setup').hidden = !s.connected;
-  $('#disconnect').hidden = !s.connected;
+  $('#setup').hidden = !s.connected || (s.multiUser && (s.role !== 'owner' || !s.driveConnected));
+  $('#disconnect').hidden = !s.connected || (s.multiUser && (s.role !== 'owner' || !s.driveConnected));
+  $('#disconnect').textContent = s.multiUser ? 'Retirer l’autorisation du stockage Google' : 'Déconnecter Google';
+  $('#logout-household').hidden = !s.multiUser || !s.connected;
+  if (s.multiUser) {
+    const text = !s.connected ? 'Connectez votre compte Google pour rejoindre le foyer. Le propriétaire doit vous avoir ajouté au préalable.'
+      : !s.driveConnected ? 'La session est ouverte. Le propriétaire doit reconnecter le stockage Google du foyer.'
+      : `Connecté au foyer en tant que ${s.role === 'owner' ? 'propriétaire' : 'membre'}. Le stockage est commun à tous les membres.`;
+    $('#connection-state').insertAdjacentHTML('beforeend', `<p class="muted">${esc(text)}</p>${s.role === 'owner' ? '<p><a class="secondary" href="/auth/google?drive=1">Reconnecter le stockage Google</a></p>' : ''}`);
+  }
   $('#google-links').innerHTML = [s.sheetUrl ? `<a class="secondary" href="${esc(s.sheetUrl)}" target="_blank" rel="noopener noreferrer">Ouvrir Google Sheets ↗</a>` : '', s.driveUrl ? `<a class="secondary" href="${esc(s.driveUrl)}" target="_blank" rel="noopener noreferrer">Ouvrir Google Drive ↗</a>` : ''].join('');
   showView(state.view);
 }
 async function load() {
   if (state.demo) { render(); return; }
   state.status = await api('/api/status');
-  if (state.status.connected && state.status.ready) state.data = await api('/api/data?month=' + $('#month').value);
+  if (state.status.connected && state.status.ready && (!state.status.multiUser || state.status.driveConnected)) state.data = await api('/api/data?month=' + $('#month').value);
   else state.data = { documents: [], operations: [], budgets: [], categories: [] };
   render();
+  if (state.view === 'household') await loadHousehold();
 }
 function requireStorage() {
   if (state.demo) { message('L’exemple est en lecture seule. Quittez-le et connectez Google pour enregistrer vos données.'); return false; }
@@ -275,6 +291,32 @@ function editSupplier(id) {
 }
 $('#supplier-search').oninput = renderSuppliers;
 $('#cancel-supplier').onclick = resetSupplierForm;
+async function loadHousehold() {
+  const s = state.status;
+  $('#household-owner-controls').hidden = true;
+  $('#members-list').innerHTML = '';
+  if (!s.multiUser) { $('#household-state').textContent = 'Le mode foyer partagé sera disponible avec MULTI_USER=true dans la configuration de l’add-on. Le mode local actuel reste personnel.'; return; }
+  if (!s.connected) { $('#household-state').textContent = 'Connectez-vous avec votre compte Google pour rejoindre le foyer.'; return; }
+  if (s.role !== 'owner') { $('#household-state').textContent = 'Vous êtes membre du foyer : vous pouvez consulter les données et ajouter ou modifier des informations. Le propriétaire gère les accès.'; return; }
+  const data = await api('/api/household');
+  $('#household-state').textContent = `Propriétaire : ${data.owner?.name || ''} (${data.owner?.email || ''}). Le dossier Drive et le tableur sont accessibles aux membres à travers MyCompta.`;
+  $('#household-owner-controls').hidden = false;
+  $('#members-list').innerHTML = data.members.length ? `<table><thead><tr><th>Membre</th><th>Accès</th><th></th></tr></thead><tbody>${data.members.map(m => `<tr><td>${esc(m.name || m.email)}<span class="subtext">${esc(m.name ? m.email : '')}</span></td><td>${m.status === 'active' ? 'Accès activé' : 'Autorisé, première connexion à effectuer'}</td><td><button class="text-button" data-remove-member="${esc(m.id)}">Retirer</button></td></tr>`).join('')}</tbody></table>` : empty('Aucun autre membre', 'Ajoutez une adresse Google pour partager votre foyer.');
+}
+$('#member-form').onsubmit = event => {
+  event.preventDefault();
+  const email = event.target.elements.email.value;
+  action(async () => {
+    await api('/api/household/members', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ email }) });
+    event.target.reset();
+    await loadHousehold();
+  }, 'Membre autorisé. Communiquez-lui le lien MyCompta pour sa première connexion.');
+};
+$('#logout-household').onclick = () => action(async () => {
+  await api('/api/logout', { method: 'POST' });
+  if ($('#operation-dialog').open) $('#operation-dialog').close();
+  await load();
+}, 'Votre session est fermée. Le foyer reste accessible aux autres membres.');
 $('#supplier-form').onsubmit = event => {
   event.preventDefault();
   if (!requireStorage()) return;
@@ -294,5 +336,5 @@ $('#categorize-existing').onclick = () => {
   });
 };
 const errorCode = new URLSearchParams(location.search).get('error');
-if (errorCode) { message(errorCode === 'configuration' ? 'Renseignez la configuration Google avant de vous connecter.' : errorCode === 'compte' ? 'Cet espace appartient à un autre compte Google. Reconnectez le compte utilisé pour créer votre espace MyCompta.' : 'La connexion Google n’a pas abouti. Vérifiez les autorisations, le client OAuth et l’URI de redirection, puis réessayez.', true); history.replaceState(null, '', '/'); showView('settings'); }
+if (errorCode) { message(errorCode === 'configuration' ? 'Renseignez la configuration Google avant de vous connecter.' : errorCode === 'nonmembre' ? 'Ce compte ne fait pas partie du foyer. Le propriétaire doit ajouter votre adresse Google dans Mon foyer.' : errorCode === 'compte' ? 'Cet espace appartient à un autre compte Google. Reconnectez le compte utilisé pour créer votre espace MyCompta.' : 'La connexion Google n’a pas abouti. Vérifiez les autorisations, le client OAuth et l’URI de redirection, puis réessayez.', true); history.replaceState(null, '', '/'); showView('settings'); }
 action(load);

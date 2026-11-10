@@ -1,6 +1,14 @@
 # MyCompta
 
-Application locale en français pour suivre les dépenses d’un foyer. Les données financières sont stockées dans Google Sheets, les PDF dans Google Drive. Node.js 24 est recommandé.
+Application en français pour suivre les dépenses d’un foyer, en mode local personnel ou en add-on HAOS partagé. Les données financières sont stockées dans Google Sheets, les PDF dans Google Drive. Node.js 24 est recommandé.
+
+## Add-on HAOS et foyer partagé
+
+Les fichiers [config.yaml](./config.yaml), [Dockerfile](./Dockerfile) et [addon.js](./addon.js) préparent une installation locale sur HAOS. Suivre le [guide de déploiement](./DOCS.md) pour l’URL HTTPS, les options, le proxy inverse, OAuth et le transfert de l’espace existant. Docker n’étant pas disponible dans l’environnement de développement, la construction et l’installation HAOS restent à confirmer sur la machine cible.
+
+Le mode partagé s’active avec `MULTI_USER=true`, `APP_URL`, `OWNER_EMAIL` et un `DATA_DIR` persistant. Chaque personne utilise sa propre session Google. Le propriétaire ajoute et retire les adresses autorisées dans **Mon foyer** ; les membres accèdent aux mêmes données et peuvent en ajouter ou en modifier. Leur connexion normale demande uniquement l’identité Google et ne remplace pas les jetons Drive/Sheets du propriétaire. Les PDF sont servis par une route authentifiée de MyCompta ; il n’est pas nécessaire de partager le jeton propriétaire ni d’élargir le scope `drive.file` des membres.
+
+Les nouvelles opérations et documents portent `createdBy` (adresse du compte connecté). Les anciens champs financiers restent en place : `createdBy` est ajouté en P des opérations et I des documents si ces emplacements sont libres. Les sessions persistantes stockent une empreinte du cookie, jamais sa valeur brute ; le retrait d’un membre invalide son accès côté serveur. Aucun e-mail d’invitation n’est envoyé automatiquement.
 
 ## Démarrer
 
@@ -23,7 +31,7 @@ Ouvrir http://localhost:3001. Sans identifiants Google, le mode « Explorer un e
 
 Les scopes `openid email profile` permettent d’afficher le nom et l’adresse vérifiée du compte connecté, selon [Google OpenID Connect](https://developers.google.com/identity/openid-connect/reference). Le scope `drive.file` limite l’accès aux fichiers créés ou autorisés pour l’application, y compris son tableur. Les API sont appelées depuis le serveur ; le secret et les jetons ne sont jamais envoyés à l’interface. Voir les documentations officielles [OAuth côté serveur](https://developers.google.com/identity/protocols/oauth2/web-server), [autorisations Sheets](https://developers.google.com/workspace/sheets/api/scopes) et [import Drive](https://developers.google.com/workspace/drive/api/guides/manage-uploads).
 
-La connexion reprend le parcours de ComptaInf (sélection du compte, connexion conservée, identité visible), avec un seul accès OAuth pour Drive et Sheets. Aucun compte de service n’est nécessaire. Utiliser un client OAuth dédié à MyCompta : les jetons et identifiants de ComptaInf ne sont pas copiés. Après vérification de l’espace, celui-ci est lié à l’identifiant Google stable du propriétaire ; une connexion avec un autre compte est refusée. Pour une ancienne connexion sans identité, se déconnecter puis se reconnecter afin d’autoriser les nouveaux scopes.
+La connexion reprend le parcours de ComptaInf (sélection du compte, connexion conservée, identité visible), sans compte de service. Utiliser un client OAuth dédié à MyCompta : les jetons et identifiants de ComptaInf ne sont pas copiés. L’espace reste lié à l’identifiant Google stable du propriétaire ; en mode partagé, les membres autorisés y accèdent via l’application sans devenir propriétaires du stockage. Pour une ancienne connexion sans identité, se déconnecter puis se reconnecter afin d’autoriser les nouveaux scopes.
 
 Le dossier **MyCompta · Documents** contient les PDF et le tableur **MyCompta · Foyer**. Ses onglets sont `Documents`, `Operations`, `Comptes`, `Categories`, `Budgets` et `Fournisseurs`. Les en-têtes techniques doivent être conservés. Les cellules sont écrites comme valeurs brutes, jamais comme formules issues des libellés importés.
 
@@ -49,9 +57,9 @@ Le dossier **MyCompta · Documents** contient les PDF et le tableur **MyCompta �
 
 L’extraction peut être corrigée depuis les opérations. Les PDF scannés sont archivés mais nécessitent une saisie manuelle : pas d’OCR. Les relevés protégés ou illisibles sont refusés. Pas de récupération automatique auprès des banques, de conversion de devises, ni de gestion des comptes depuis l’interface dans cette version. Les catégories proposées restent celles de la liste actuelle ; la vue Fournisseurs permet de modifier les associations, pas de créer de nouvelles catégories.
 
-Le serveur écoute uniquement sur la boucle locale. Cette version est destinée à une personne sur un ordinateur de confiance, pas à un hébergement public ou à plusieurs utilisateurs. Ne pas modifier le tableur en parallèle d’une écriture dans l’application. Les écritures de l’application sont séquencées ; document et candidats sont enregistrés dans une seule requête Sheets atomique. Drive et Sheets ne forment pas une transaction unique : en cas d’échec partiel, le PDF peut déjà être dans Drive. Une nouvelle importation du même fichier le réutilise.
+Par défaut, le serveur écoute uniquement sur la boucle locale et fonctionne sur un ordinateur de confiance. Une écoute réseau nécessite le mode partagé, les sessions et une URL HTTPS derrière un proxy inverse (voir le guide HAOS). Les écritures sont séquencées sur une seule instance : ne pas lancer deux serveurs sur le même tableur ni modifier ses lignes en parallèle d’une écriture de l’application. Document et candidats sont enregistrés dans une seule requête Sheets atomique. Drive et Sheets ne forment pas une transaction unique : en cas d’échec partiel, le PDF peut déjà être dans Drive. Une nouvelle importation du même fichier le réutilise.
 
-[data/](./data/) contient uniquement les jetons OAuth et les identifiants Drive/Sheets. Ce dossier et [.env](./.env) sont ignorés par Git et doivent rester privés. La déconnexion révoque le jeton Google et efface sa copie locale ; le tableur, les PDF et leurs identifiants sont conservés. Se reconnecter avec le même compte. En mode de consentement externe « Test », Google peut imposer une reconnexion périodique.
+[data/](./data/), ou `DATA_DIR`, contient les jetons OAuth, les identifiants Drive/Sheets, les accès au foyer et les empreintes des sessions. Ce dossier et [.env](./.env) sont ignorés par Git et doivent rester privés. En mode partagé, « Me déconnecter » ferme uniquement la session courante ; le propriétaire peut séparément retirer l’autorisation Google du stockage pour tout le foyer. Le tableur, les PDF et leurs identifiants sont conservés. En mode de consentement externe « Test », Google peut imposer une reconnexion périodique.
 
 ## Vérifier
 

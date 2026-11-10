@@ -3,10 +3,11 @@ const path = require('node:path');
 const crypto = require('node:crypto');
 const { CATEGORIES, validateOperation, reconcileImport } = require('../services/operations');
 const { DEFAULT_SUPPLIERS, normalizeSupplier, validateSupplier, categorizeOperation } = require('../services/suppliers');
+const { runtimeConfig } = require('../services/config');
 
 const TABLES = {
-  Documents: ['id', 'name', 'source', 'driveId', 'hash', 'importedAt', 'status', 'note'],
-  Operations: ['id', 'documentId', 'date', 'label', 'amount', 'currency', 'account', 'category', 'type', 'status', 'page', 'raw', 'holder', 'cardLast4', 'cardType'],
+  Documents: ['id', 'name', 'source', 'driveId', 'hash', 'importedAt', 'status', 'note', 'createdBy'],
+  Operations: ['id', 'documentId', 'date', 'label', 'amount', 'currency', 'account', 'category', 'type', 'status', 'page', 'raw', 'holder', 'cardLast4', 'cardType', 'createdBy'],
   Comptes: ['id', 'name', 'source', 'currency'],
   Categories: ['name', 'rule'],
   Budgets: ['month', 'category', 'amount'],
@@ -18,12 +19,14 @@ const cells = row => ({ values: row.map(value => ({ userEnteredValue: typeof val
 const rowFor = (table, value) => TABLES[table].map(key => value[key] ?? '');
 
 class GoogleStore {
-  constructor({ directory = path.join(__dirname, '..', 'data'), fetchImpl = fetch, env = process.env } = {}) {
+  constructor({ directory, fetchImpl = fetch, env = process.env } = {}) {
+    const config = runtimeConfig(env);
+    directory ||= config.directory;
     this.directory = directory;
     this.fetch = fetchImpl;
     this.clientId = env.GOOGLE_CLIENT_ID;
     this.clientSecret = env.GOOGLE_CLIENT_SECRET;
-    this.redirect = `http://localhost:${env.PORT || 3001}/auth/callback`;
+    this.redirect = `${config.origin}/auth/callback`;
   }
   get configured() { return Boolean(this.clientId && this.clientSecret); }
   async load(name) {
@@ -45,10 +48,10 @@ class GoogleStore {
       sheetUrl: resources.spreadsheetId ? `https://docs.google.com/spreadsheets/d/${resources.spreadsheetId}/edit` : null,
       driveUrl: resources.folderId ? `https://drive.google.com/drive/folders/${resources.folderId}` : null };
   }
-  authorizationUrl(state) {
+  authorizationUrl(state, drive = true) {
     return 'https://accounts.google.com/o/oauth2/v2/auth?' + new URLSearchParams({
       client_id: this.clientId, redirect_uri: this.redirect, response_type: 'code',
-      scope: 'openid email profile https://www.googleapis.com/auth/drive.file', access_type: 'offline', prompt: 'consent select_account', state,
+      scope: 'openid email profile' + (drive ? ' https://www.googleapis.com/auth/drive.file' : ''), access_type: 'offline', prompt: 'consent select_account', state,
     });
   }
   async tokenRequest(fields) {
@@ -61,19 +64,27 @@ class GoogleStore {
     if (!response.ok) throw fail('Connexion Google expirée ou refusée. Reconnectez le même compte Google.', 401);
     return data;
   }
-  async exchangeCode(code) {
+  async authenticateCode(code, drive = true) {
     const token = await this.tokenRequest({ code, grant_type: 'authorization_code', redirect_uri: this.redirect });
-    if (!token.scope?.split(' ').includes('https://www.googleapis.com/auth/drive.file')) throw fail('Autorisez l’accès aux fichiers MyCompta dans Google.', 401);
+    if (drive && !token.scope?.split(' ').includes('https://www.googleapis.com/auth/drive.file')) throw fail('Autorisez l’accès aux fichiers MyCompta dans Google.', 401);
     const response = await this.fetch('https://openidconnect.googleapis.com/v1/userinfo', {
       headers: { Authorization: `Bearer ${token.access_token}` }, signal: AbortSignal.timeout(30000),
     });
     if (!response.ok) throw fail('Impossible de vérifier le compte Google. Réessayez la connexion.', 401);
     const profile = await response.json();
     if (!profile.sub || !profile.email || profile.email_verified !== true) throw fail('Le compte Google doit disposer d’une adresse e-mail vérifiée.', 401);
-    const resources = await this.load('resources');
-    if (resources.ownerId && resources.ownerId !== profile.sub) throw fail('Cet espace appartient à un autre compte Google. Reconnectez le compte utilisé lors de sa création.', 409);
     const user = { id: profile.sub, name: String(profile.name || profile.email), email: String(profile.email) };
-    await this.save('token', { ...token, user, expires_at: Date.now() + token.expires_in * 1000 });
+    return { ...token, user, expires_at: Date.now() + token.expires_in * 1000 };
+  }
+  async saveOwnerToken(token) {
+    const resources = await this.load('resources');
+    if (resources.ownerId && resources.ownerId !== token.user.id) throw fail('Cet espace appartient à un autre compte Google. Reconnectez le compte utilisé lors de sa création.', 409);
+    const previous = await this.load('token');
+    if (!token.refresh_token && previous.user?.id === token.user.id) token.refresh_token = previous.refresh_token;
+    await this.save('token', token);
+  }
+  async exchangeCode(code) {
+    return this.saveOwnerToken(await this.authenticateCode(code));
   }
   async accessToken() {
     const token = await this.load('token');
@@ -169,16 +180,19 @@ class GoogleStore {
     const { base } = await this.context();
     await this.ensureSuppliers();
     const params = new URLSearchParams({ valueRenderOption: 'UNFORMATTED_VALUE', dateTimeRenderOption: 'FORMATTED_STRING' });
-    for (const name of Object.keys(TABLES)) params.append('ranges', `${name}!A:O`);
+    for (const name of Object.keys(TABLES)) params.append('ranges', `${name}!A:P`);
     const result = await this.request(base + '/values:batchGet?' + params);
-    const operationsHeader = result.valueRanges[1]?.values?.[0];
-    // Append only the new columns; never overwrite existing headers or financial rows.
-    if (operationsHeader && TABLES.Operations.slice(0, 12).every((c, i) => operationsHeader[i] === c) &&
-      TABLES.Operations.slice(12).every((c, i) => !operationsHeader[i + 12])) {
-      const operationRows = result.valueRanges[1].values;
-      if (operationRows.slice(1).some(row => row.slice(12, 15).some(value => value !== '' && value != null))) throw fail('Les colonnes M à O sont déjà utilisées. Déplacez leur contenu avant d’ajouter le titulaire.', 409);
-      await this.json(base + '/values/Operations!M1:O1?valueInputOption=RAW', 'PUT', { values: [TABLES.Operations.slice(12)] });
-      operationsHeader.splice(12, 3, ...TABLES.Operations.slice(12));
+    // Add missing trailing metadata columns without overwriting customized cells.
+    for (const [name, index, lengths] of [['Documents', 0, [8]], ['Operations', 1, [15, 12]]]) {
+      const rows = result.valueRanges[index]?.values || [];
+      const header = rows[0];
+      if (!header) continue;
+      const length = lengths.find(n => TABLES[name].slice(0, n).every((c, i) => header[i] === c) && TABLES[name].slice(n).every((c, i) => !header[n + i]));
+      if (!length) continue;
+      if (rows.slice(1).some(row => row.slice(length, TABLES[name].length).some(v => v !== '' && v != null))) throw fail(`Des colonnes supplémentaires sont déjà utilisées dans ${name}. Déplacez leur contenu avant la migration.`, 409);
+      const start = String.fromCharCode(65 + length), end = String.fromCharCode(64 + TABLES[name].length);
+      await this.json(base + `/values/${name}!${start}1:${end}1?valueInputOption=RAW`, 'PUT', { values: [TABLES[name].slice(length)] });
+      header.splice(length, TABLES[name].length - length, ...TABLES[name].slice(length));
     }
     const data = {};
     Object.entries(TABLES).forEach(([name, columns], index) => {
@@ -296,6 +310,7 @@ class GoogleStore {
     const old = data.operations.find(o => o.id === operation.id);
     if (update && !old) throw fail('Opération introuvable.', 404);
     if (operation.documentId && !data.documents.some(d => d.id === operation.documentId)) throw fail('Document introuvable.');
+    if (old) operation.createdBy = old.createdBy || '';
     await this.writeRow('Operations', operation, old?._row);
     return operation;
   }

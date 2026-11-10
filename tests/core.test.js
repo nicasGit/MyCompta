@@ -194,8 +194,8 @@ test('legacy Sheets adds card identity headers without changing existing operati
   assert.equal(data.operations[0].holder, '');
   assert.equal(data.operations[0].amount, operation().amount);
   assert.equal(calls.length, 1);
-  assert.ok(calls[0][0].endsWith('/values/Operations!M1:O1?valueInputOption=RAW'));
-  assert.deepEqual(calls[0][1], { values: [['holder', 'cardLast4', 'cardType']] });
+  assert.ok(calls[0][0].endsWith('/values/Operations!M1:P1?valueInputOption=RAW'));
+  assert.deepEqual(calls[0][1], { values: [['holder', 'cardLast4', 'cardType', 'createdBy']] });
   values.push('existing custom content');
   await assert.rejects(() => store.read(), /déjà utilisées/);
   assert.equal(calls.length, 1);
@@ -208,7 +208,7 @@ test('card identity survives validation and Sheets serialization', async t => {
   let request;
   const store = await withStore(t, async (url, options) => { request = JSON.parse(options.body); return json({}); });
   await store.writeRow('Operations', value, 3);
-  assert.deepEqual(request.values[0].slice(12), ['FLORENCE GALLEZ', '3706', 'principale']);
+  assert.deepEqual(request.values[0].slice(12), ['FLORENCE GALLEZ', '3706', 'principale', '']);
 });
 
 test('HTTP flow: upload, deduplication, corrections, budgets and cross-origin protection', async t => {

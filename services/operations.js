@@ -19,6 +19,7 @@ function validateOperation(input) {
   return { date, label, amount: Math.round(input.amount * 100) / 100, currency: input.currency,
     category: input.category, type: input.type, status: input.status === 'ignored' ? 'ignored' : 'validated', account: String(input.account || '').slice(0, 100),
     holder: String(input.holder || '').trim().slice(0, 150), cardLast4, cardType: String(input.cardType || '').trim().slice(0, 40),
+    createdBy: String(input.createdBy || '').slice(0, 254),
     documentId: String(input.documentId || '').slice(0, 100), page, raw: String(input.raw || '').slice(0, 2000) };
 }
 function summarize(operations, month) {
@@ -45,7 +46,7 @@ function reconcileImport(incoming, existing) {
     if (index < 0) return { ...operation, status: 'validated' };
     const [old] = remaining.splice(index, 1);
     return { ...operation, id: old.id, category: old.category, account: old.account || operation.account,
-      type: old.type, status: old.status === 'ignored' ? 'ignored' : 'validated',
+      type: old.type, status: old.status === 'ignored' ? 'ignored' : 'validated', createdBy: old.createdBy || '',
       holder: operation.holder || old.holder || '', cardLast4: operation.cardLast4 || old.cardLast4 || '', cardType: operation.cardType || old.cardType || '' };
   });
 }

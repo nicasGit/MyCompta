@@ -1,0 +1,27 @@
+name: MyCompta
+version: "0.2.0"
+slug: mycompta
+description: Dépenses et documents du foyer avec Google Sheets et Drive
+arch:
+  - amd64
+  - aarch64
+startup: application
+boot: auto
+init: false
+ingress: false
+webui: "http://[HOST]:[PORT:3001]"
+ports:
+  3001/tcp: 3001
+ports_description:
+  3001/tcp: Interface HTTP interne à placer derrière un proxy HTTPS
+watchdog: "http://[HOST]:[PORT:3001]/health"
+options:
+  app_url: "https://mycompta.example.com"
+  owner_email: ""
+  google_client_id: ""
+  google_client_secret: ""
+schema:
+  app_url: url
+  owner_email: str
+  google_client_id: str
+  google_client_secret: password
