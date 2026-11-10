@@ -20,6 +20,12 @@ npm start
 
 Ouvrir http://localhost:3001. Sans identifiants Google, le mode « Explorer un exemple » permet de parcourir une interface avec des données fictives, en lecture seule.
 
+## Installer sur téléphone
+
+MyCompta est une application web installable (PWA), comme ComptaInf. Ouvrir son adresse HTTPS sur le téléphone, puis utiliser **Installer MyCompta** dans l'en-tête. Sur Android, Chrome propose l'installation depuis son menu ; sur iPhone ou iPad, utiliser Safari → Partager → Sur l'écran d'accueil. L'icône bleue ouvre ensuite MyCompta dans une fenêtre dédiée. Le bouton disparaît dans cette fenêtre.
+
+Le serveur HAOS doit rester accessible depuis le téléphone. L'installation ne remplace pas la connexion Google : chaque membre conserve son compte et ses droits. Internet est nécessaire pour consulter ou modifier le foyer ; hors connexion, une page invite à réessayer. Le service worker ne conserve aucune donnée financière ni PDF en cache. Les nouvelles versions sont récupérées en rouvrant l'application avec une connexion active. Voir les [conditions d'installation des PWA](https://developer.mozilla.org/en-US/docs/Web/Progressive_web_apps/Guides/Making_PWAs_installable).
+
 ## Configurer Google
 
 1. Créer un projet dans [Google Cloud Console](https://console.cloud.google.com/).

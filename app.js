@@ -207,7 +207,9 @@ function createApp(store = new GoogleStore(), config = runtimeConfig()) {
   });
   app.delete('/api/suppliers/:id', async (req, res) => res.json(await serialize(() => store.deleteSupplier(req.params.id))));
   app.post('/api/categorize', async (req, res) => res.json(await serialize(() => store.categorizeOperations())));
-  app.use(express.static(path.join(__dirname, 'public')));
+  app.use(express.static(path.join(__dirname, 'public'), { setHeaders(res, file) {
+    if (/\.(?:html|js|css|webmanifest)$/.test(file)) res.setHeader('Cache-Control', 'no-cache');
+  } }));
   app.use((error, req, res, next) => {
     const status = error.type === 'entity.too.large' ? 413 : error.status || 500;
     res.status(status).json({ error: status === 413 ? 'Le fichier dépasse la limite de 15 Mo.' : error.message || 'Une erreur est survenue.' });

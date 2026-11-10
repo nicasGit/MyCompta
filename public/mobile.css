@@ -1,0 +1,28 @@
+.brand-row { display:flex; flex-direction:column; gap:18px; align-items:flex-start; }
+.install-button { font-size:11px; }
+#install-dialog { max-width:490px; width:calc(100% - 32px); }
+#install-dialog p { overflow-wrap:anywhere; }
+@media(max-width:720px) {
+  body { padding-left:env(safe-area-inset-left); padding-right:env(safe-area-inset-right); }
+  .sidebar { padding-top:max(16px, env(safe-area-inset-top)); }
+  .brand-row { flex-direction:row; align-items:center; justify-content:space-between; gap:10px; }
+  .install-button { min-height:44px; padding:8px 10px; }
+  main { min-width:0; }
+  .content { padding-bottom:max(24px, env(safe-area-inset-bottom)); }
+  .panel,.dashboard-grid,.stats,.settings-panel { min-width:0; }
+  .nav { min-height:44px; }
+  input,select,textarea { font-size:16px; max-width:100%; min-height:44px; }
+  .form-grid { grid-template-columns:1fr; }
+  .form-grid .full { grid-column:auto; }
+  .upload-form { align-items:stretch; }
+  .upload-form label { min-width:0; width:100%; }
+  .panel-heading { flex-wrap:wrap; }
+  .topbar>span { min-width:0; overflow-wrap:anywhere; }
+  .document-row>.actions { width:100%; }
+  dialog { max-height:calc(100dvh - 32px); overflow-y:auto; }
+  .primary,.secondary,.quiet { min-height:44px; }
+}
+@media(max-width:380px) {
+  .brand { font-size:19px; gap:6px; }
+  .install-button { font-size:10px; }
+}
