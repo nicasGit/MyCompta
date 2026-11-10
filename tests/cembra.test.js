@@ -5,6 +5,7 @@ const { parseCembraTables } = require('../parsers/cembra');
 const { extractPdf } = require('../services/pdf');
 const { createApp } = require('../app');
 const { GoogleStore } = require('../google/store');
+const { invoiceDate, cembraDocumentName } = require('../services/document-name');
 const header = ['Date de trans.', 'Date de com.', 'Description', 'Crédit CHF', 'Débit CHF'];
 const row = (label = 'Coop-5145 Savigny Savigny CHE', credit = '', debit = '34.05') => ['28.09.2026', '29.09.2026', label, credit, debit];
 
@@ -61,7 +62,7 @@ test('a missing card heading stays unknown; a headerless continuation retains it
 });
 
 // A real two-page PDF with ruled tables, including empty credit cells.
-function cembraPdf(mode = 'debit') {
+function cembraPdf(mode = 'debit', invoice = '30.09.2026') {
   const objects = ['<< /Type /Catalog /Pages 2 0 R >>', '<< /Type /Pages /Kids [4 0 R 6 0 R] /Count 2 >>', '<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica /Encoding /WinAnsiEncoding >>'];
   for (let page = 0; page < 2; page++) {
     const commands = ['0.5 w'];
@@ -69,6 +70,7 @@ function cembraPdf(mode = 'debit') {
     for (const x of xs) commands.push(`${x} 740 m ${x} 680 l S`);
     for (const y of [740, 710, 680]) commands.push(`20 ${y} m 580 ${y} l S`);
     const print = (text, x, y) => commands.push(`BT /F1 9 Tf ${x} ${y} Td (${text}) Tj ET`);
+    if (page === 0 && invoice) print(`Date de facture : ${invoice}`, 20, 780);
     print(page ? 'Carte suppl\351mentaire Certo! Mastercard se termine par XXXX XXXX XXXX 1819 NICOLAS JOLLOIS' : 'Carte principale Certo! Mastercard se termine par XXXX XXXX XXXX 3706 FLORENCE GALLEZ', 20, 760);
     ['Date de trans.', 'Date de com.', 'Description', 'Cr\351dit CHF', 'D\351bit CHF'].forEach((text, i) => print(text, xs[i] + 3, 720));
     if (mode !== 'empty') ['28.09.2026', '29.09.2026', page ? 'TEMU.COM BASEL DUB' : 'Coop Savigny CHE', mode === 'credit' ? '34.05' : '', mode === 'credit' ? '' : page ? '53.82' : '34.05'].forEach((text, i) => { if (text) print(text, xs[i] + 3, 690); });
@@ -89,6 +91,7 @@ function cembraPdf(mode = 'debit') {
 test('PDF table extraction preserves blank columns on a real multipage PDF', async () => {
   const result = await extractPdf(cembraPdf(), 'Cembra');
   assert.equal(result.operations.length, 2);
+  assert.equal(result.suggestedName, 'Cembra - 2026-09-30.pdf');
   assert.deepEqual(result.operations.map(o => [o.amount, o.type, o.page]), [[34.05, 'expense', 1], [53.82, 'expense', 2]]);
   assert.deepEqual(result.operations.map(o => [o.holder, o.cardLast4, o.cardType]), [
     ['FLORENCE GALLEZ', '3706', 'principale'], ['NICOLAS JOLLOIS', '1819', 'supplémentaire'],
@@ -96,10 +99,12 @@ test('PDF table extraction preserves blank columns on a real multipage PDF', asy
 });
 test('HTTP Cembra imports use the dedicated parser and reanalyse the archived PDF without uploading again', async t => {
   const data = { documents: [], operations: [], budgets: [] };
-  let uploads = 0, replacements = 0;
-  const fake = { read: async () => structuredClone(data), uploadPdf: async () => { uploads++; return { id: 'pdf' }; },
+  let uploads = 0, replacements = 0, renames = 0;
+  const fake = { read: async () => structuredClone(data), uploadPdf: async (buffer, name) => { uploads++; assert.equal(name, 'Cembra - 2026-09-30.pdf'); return { id: 'pdf' }; },
+    renamePdf: async (id, name) => { renames++; assert.equal(id, 'pdf'); assert.equal(name, 'Cembra - 2026-09-30.pdf'); },
+    renameDocument: async (id, name) => { data.documents.find(d => d.id === id).name = name; },
     appendImport: async (doc, ops) => { data.documents.push(doc); data.operations.push(...ops); },
-    downloadPdf: async () => cembraPdf('credit'), replacePendingImport: async (doc, ops) => { replacements++; data.operations = ops; } };
+    downloadPdf: async () => cembraPdf('credit'), replaceImport: async (doc, ops) => { replacements++; data.operations = ops; } };
   const server = createApp(fake).listen(0, '127.0.0.1');
   t.after(() => { server.closeAllConnections(); server.close(); });
   await once(server, 'listening');
@@ -108,6 +113,8 @@ test('HTTP Cembra imports use the dedicated parser and reanalyse the archived PD
   assert.equal(response.status, 201);
   assert.equal((await response.json()).count, 2);
   assert.equal(data.operations[0].holder, 'FLORENCE GALLEZ');
+  assert.equal(data.documents[0].name, 'Cembra - 2026-09-30.pdf');
+  assert.equal(renames, 1);
   const url = base + '/api/documents/' + data.documents[0].id + '/reanalyse';
   const again = await fetch(url, { method: 'POST', headers: { 'X-MyCompta': '1' } });
   assert.equal(again.status, 200);
@@ -121,18 +128,63 @@ test('HTTP Cembra imports use the dedicated parser and reanalyse the archived PD
   assert.equal(replacements, 1);
   assert.equal(data.operations.length, 2);
   data.operations[0].status = 'validated';
-  const blocked = await fetch(url, { method: 'POST', headers: { 'X-MyCompta': '1' } });
-  assert.equal(blocked.status, 409);
-  assert.equal(replacements, 1);
+  fake.downloadPdf = async () => cembraPdf('credit');
+  const repeated = await fetch(url, { method: 'POST', headers: { 'X-MyCompta': '1' } });
+  assert.equal(repeated.status, 200);
+  assert.equal(replacements, 2);
+  data.documents[0].name = 'ancien-nom.pdf';
+  const originalOperations = structuredClone(data.operations);
+  const renamed = await fetch(base + '/api/documents/' + data.documents[0].id + '/rename', { method: 'POST', headers: { 'X-MyCompta': '1' } });
+  assert.equal(renamed.status, 200);
+  assert.equal((await renamed.json()).name, 'Cembra - 2026-09-30.pdf');
+  assert.deepEqual(data.operations, originalOperations);
+  fake.downloadPdf = async () => cembraPdf('debit', '');
+  const unknownDate = await fetch(base + '/api/documents/' + data.documents[0].id + '/rename', { method: 'POST', headers: { 'X-MyCompta': '1' } });
+  assert.equal(unknownDate.status, 422);
+  assert.deepEqual(data.operations, originalOperations);
 });
-test('Sheets replaces only pending rows in descending order within one atomic update', async () => {
+
+test('document naming uses explicit invoice dates, never transactions, deadlines or ambiguous dates', () => {
+  for (const label of ['Date de facture : 30.09.2026', 'Date de la facture\n30/09/2026', 'Date de facturation : 2026-09-30', 'Facture du 30 septembre 2026', 'Relevé du 30.09.2026']) {
+    assert.equal(cembraDocumentName([{ text: label }]), 'Cembra - 2026-09-30.pdf');
+  }
+  assert.equal(invoiceDate([{ text: 'Date de facture : 1 février 2026' }]), '2026-02-01');
+  for (const text of ['Date de facture : 31.09.2026', '28.09.2026 29.09.2026 Coop 34.05', 'À payer avant le 30.09.2026', 'Date de facture : 30.09.2026\nDate de facture : 31.10.2026']) {
+    assert.equal(cembraDocumentName([{ text }]), null);
+  }
+  assert.equal(invoiceDate([{ text: 'Date de facture : 30.09.2026' }, { text: 'Date de facture : 30.09.2026' }]), '2026-09-30');
+});
+
+test('missing invoice date keeps the original filename instead of using a transaction date', async () => {
+  const result = await extractPdf(cembraPdf('debit', ''), 'Cembra');
+  assert.equal(result.suggestedName, null);
+  assert.match(result.note, /nom actuel conservé/);
+  assert.equal(result.operations.length, 2);
+});
+
+test('renaming updates Drive metadata and only the document row while preserving identifiers', async () => {
+  const calls = [];
+  const store = new GoogleStore();
+  store.read = async () => ({ documents: [{ id: 'doc', driveId: 'drive-file', name: 'original.pdf', hash: 'hash', _row: 4 }] });
+  store.json = async (url, method, body) => { calls.push({ url, method, body }); return { id: 'drive-file', name: body.name }; };
+  store.writeRow = async (table, value, row) => { calls.push({ table, value, row }); return value; };
+  await store.renameDocument('doc', 'Cembra - 2026-09-30.pdf');
+  assert.equal(calls[0].method, 'PATCH');
+  assert.ok(calls[0].url.includes('/drive/v3/files/drive-file?'));
+  assert.deepEqual(calls[0].body, { name: 'Cembra - 2026-09-30.pdf' });
+  assert.equal(calls[1].table, 'Documents');
+  assert.equal(calls[1].row, 4);
+  assert.equal(calls[1].value.id, 'doc');
+  assert.equal(calls[1].value.hash, 'hash');
+});
+test('Sheets rereads all document rows in descending order within one atomic update', async () => {
   let batch;
   const store = new GoogleStore({ fetchImpl: async () => { throw new Error('No real requests'); } });
   store.read = async () => ({ documents: [{ id: 'doc', _row: 4 }], operations: [{ documentId: 'doc', status: 'pending', _row: 3 }, { documentId: 'other', status: 'validated', _row: 5 }, { documentId: 'doc', status: 'pending', _row: 9 }] });
   store.context = async () => ({ base: 'https://example.test' });
   store.request = async () => ({ sheets: [{ properties: { title: 'Operations', sheetId: 101 } }, { properties: { title: 'Documents', sheetId: 100 } }] });
   store.json = async (url, method, body) => { batch = body; };
-  await store.replacePendingImport({ id: 'doc' }, [{ id: 'new' }]);
+  await store.replaceImport({ id: 'doc' }, [{ id: 'new' }]);
   assert.deepEqual(batch.requests.slice(0, 2).map(r => r.deleteDimension.range.startIndex), [8, 2]);
   assert.equal(batch.requests[2].updateCells.start.rowIndex, 3);
   assert.equal(batch.requests[3].appendCells.sheetId, 101);

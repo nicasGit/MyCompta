@@ -1,7 +1,8 @@
 const fs = require('node:fs/promises');
 const path = require('node:path');
 const crypto = require('node:crypto');
-const { CATEGORIES, validateOperation } = require('../services/operations');
+const { CATEGORIES, validateOperation, reconcileImport } = require('../services/operations');
+const { DEFAULT_SUPPLIERS, normalizeSupplier, validateSupplier, categorizeOperation } = require('../services/suppliers');
 
 const TABLES = {
   Documents: ['id', 'name', 'source', 'driveId', 'hash', 'importedAt', 'status', 'note'],
@@ -9,6 +10,7 @@ const TABLES = {
   Comptes: ['id', 'name', 'source', 'currency'],
   Categories: ['name', 'rule'],
   Budgets: ['month', 'category', 'amount'],
+  Fournisseurs: ['id', 'name', 'category'],
 };
 const sheetIds = Object.fromEntries(Object.keys(TABLES).map((name, i) => [name, i]));
 const fail = (message, status = 400) => Object.assign(new Error(message), { status });
@@ -145,6 +147,7 @@ class GoogleStore {
       requests.push({ addSheet: { properties: { sheetId, title, gridProperties: { frozenRowCount: 1 } } } });
       const rows = [columns];
       if (title === 'Categories') rows.push(...CATEGORIES.map(c => [c, '']));
+      if (title === 'Fournisseurs') rows.push(...DEFAULT_SUPPLIERS.map(s => rowFor(title, s)));
       requests.push({ updateCells: { start: { sheetId, rowIndex: 0, columnIndex: 0 }, rows: rows.map(cells), fields: 'userEnteredValue' } });
       requests.push({ repeatCell: { range: { sheetId, startRowIndex: 0, endRowIndex: 1 }, cell: { userEnteredFormat: { backgroundColor: { red: .1, green: .3, blue: .27 }, textFormat: { bold: true, foregroundColor: { red: 1, green: 1, blue: 1 } } } }, fields: 'userEnteredFormat' } });
     }
@@ -164,6 +167,7 @@ class GoogleStore {
   }
   async read() {
     const { base } = await this.context();
+    await this.ensureSuppliers();
     const params = new URLSearchParams({ valueRenderOption: 'UNFORMATTED_VALUE', dateTimeRenderOption: 'FORMATTED_STRING' });
     for (const name of Object.keys(TABLES)) params.append('ranges', `${name}!A:O`);
     const result = await this.request(base + '/values:batchGet?' + params);
@@ -191,7 +195,53 @@ class GoogleStore {
       if (!/^\d{4}-(0[1-9]|1[0-2])$/.test(b.month) || !CATEGORIES.includes(b.category) || !Number.isFinite(amount) || amount < 0) throw fail(`Budget invalide dans Sheets, ligne ${b._row}.`, 409);
       return { ...b, amount };
     });
-    return { documents: data.Documents, operations, accounts: data.Comptes, categories: data.Categories, budgets };
+    const suppliers = data.Fournisseurs.map(s => {
+      try { return { ...s, ...validateSupplier(s) }; }
+      catch (error) { throw fail(`Fournisseur invalide dans Sheets, ligne ${s._row} : ${error.message}`, 409); }
+    });
+    if (new Set(suppliers.map(s => s.id)).size !== suppliers.length || new Set(suppliers.map(s => normalizeSupplier(s.name))).size !== suppliers.length) throw fail('Des fournisseurs sont en double dans Sheets. Corrigez les doublons dans l’onglet Fournisseurs.', 409);
+    return { documents: data.Documents, operations, accounts: data.Comptes, categories: data.Categories, budgets, suppliers };
+  }
+  async ensureSuppliers() {
+    if (this.suppliersReady) return;
+    if (!this.suppliersSetup) this.suppliersSetup = (async () => {
+      const { base } = await this.context();
+      const metadata = await this.request(base + '?fields=sheets.properties');
+      if (!metadata.sheets.some(s => s.properties.title === 'Fournisseurs')) {
+        const sheetId = Math.max(104, ...metadata.sheets.map(s => s.properties.sheetId)) + 1;
+        await this.json(base + ':batchUpdate', 'POST', { requests: [
+          { addSheet: { properties: { sheetId, title: 'Fournisseurs', gridProperties: { frozenRowCount: 1 } } } },
+          { updateCells: { start: { sheetId, rowIndex: 0, columnIndex: 0 }, rows: [TABLES.Fournisseurs, ...DEFAULT_SUPPLIERS.map(s => rowFor('Fournisseurs', s))].map(cells), fields: 'userEnteredValue' } },
+        ] });
+      }
+      this.suppliersReady = true;
+    })().finally(() => { this.suppliersSetup = null; });
+    return this.suppliersSetup;
+  }
+  async saveSupplier(supplier, update = false) {
+    const data = await this.read();
+    const value = { ...validateSupplier(supplier), id: supplier.id };
+    const old = data.suppliers.find(s => s.id === value.id);
+    if (update && !old) throw fail('Fournisseur introuvable.', 404);
+    if (data.suppliers.some(s => s.id !== value.id && normalizeSupplier(s.name) === normalizeSupplier(value.name))) throw fail('Ce fournisseur possède déjà une règle. Modifiez la règle existante.', 409);
+    return this.writeRow('Fournisseurs', value, old?._row);
+  }
+  async deleteSupplier(id) {
+    const data = await this.read();
+    const supplier = data.suppliers.find(s => s.id === id);
+    if (!supplier) throw fail('Fournisseur introuvable.', 404);
+    const { base } = await this.context();
+    await this.json(base + `/values/Fournisseurs!A${supplier._row}:C${supplier._row}:clear`, 'POST', {});
+    return { ok: true };
+  }
+  async categorizeOperations() {
+    const data = await this.read();
+    const changes = data.operations.map(o => ({ old: o, next: categorizeOperation(o, data.suppliers) })).filter(({ old, next }) => old.category !== next.category);
+    if (changes.length) {
+      const { base } = await this.context();
+      await this.json(base + '/values:batchUpdate', 'POST', { valueInputOption: 'RAW', data: changes.map(({ old, next }) => ({ range: `Operations!H${old._row}`, values: [[next.category]] })) });
+    }
+    return { updated: changes.length };
   }
   async appendImport(document, operations) {
     const { base } = await this.context();
@@ -217,12 +267,22 @@ class GoogleStore {
     if (buffer.length > max || !buffer.subarray(0, 1024).includes(Buffer.from('%PDF-'))) throw fail('Le fichier Drive n’est pas un PDF valide de 15 Mo maximum.');
     return buffer;
   }
-  async replacePendingImport(document, operations) {
+  async renamePdf(id, name) {
+    return this.json(`https://www.googleapis.com/drive/v3/files/${encodeURIComponent(id)}?fields=id,name`, 'PATCH', { name });
+  }
+  async renameDocument(id, name) {
+    const data = await this.read();
+    const document = data.documents.find(d => d.id === id);
+    if (!document) throw fail('Document introuvable.', 404);
+    await this.renamePdf(document.driveId, name);
+    return this.writeRow('Documents', { ...document, name }, document._row);
+  }
+  async replaceImport(document, operations) {
     const data = await this.read();
     const existing = data.documents.find(d => d.id === document.id);
     if (!existing) throw fail('Document introuvable.', 404);
     const old = data.operations.filter(o => o.documentId === document.id);
-    if (old.some(o => o.status !== 'pending')) throw fail('Des opérations ont déjà été validées ou ignorées. Relecture annulée.', 409);
+    operations = reconcileImport(operations, old).map(o => categorizeOperation(o, data.suppliers));
     const { base } = await this.context();
     const metadata = await this.request(base + '?fields=sheets.properties');
     const id = name => metadata.sheets.find(s => s.properties.title === name).properties.sheetId;

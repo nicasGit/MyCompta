@@ -4,7 +4,7 @@ const fs = require('node:fs/promises');
 const os = require('node:os');
 const path = require('node:path');
 const { once } = require('node:events');
-const { validateOperation, summarize } = require('../services/operations');
+const { validateOperation, summarize, reconcileImport } = require('../services/operations');
 const { parsePages, extractPdf } = require('../services/pdf');
 const { GoogleStore, TABLES } = require('../google/store');
 const { createApp } = require('../app');
@@ -24,11 +24,35 @@ test('validation refuses impossible dates, invalid amounts and unknown currencie
   assert.equal(validateOperation(operation()).amount, 12.35);
   for (const patch of [{ date: '2026-02-30' }, { amount: -10 }, { amount: NaN }, { currency: '???' }, { status: 'approved' }, { page: -1 }]) assert.throws(() => validateOperation(operation(patch)));
 });
-test('summary separates currencies and excludes pending, ignored, transfers and card settlements', () => {
+test('summary includes legacy pending operations and excludes ignored, transfers and card settlements', () => {
   const result = summarize([operation(), operation({ amount: 0.1 }), operation({ amount: 0.2 }), operation({ amount: 9, currency: 'EUR' }), operation({ type: 'transfer' }), operation({ type: 'card_payment' }), operation({ type: 'income' }), operation({ status: 'pending' }), operation({ status: 'ignored' }), operation({ date: '2026-10-01' })], '2026-11');
-  assert.deepEqual(result.totals, { CHF: 12.65, EUR: 9 });
-  assert.equal(result.count, 4);
-  assert.equal(result.pending, 1);
+  assert.deepEqual(result.totals, { CHF: 25, EUR: 9 });
+  assert.equal(result.count, 5);
+  assert.equal(result.uncategorized, 0);
+});
+
+test('uncategorized expenses count immediately, including old pending rows', () => {
+  const result = summarize([operation({ category: 'À catégoriser' }), operation({ category: 'À catégoriser', status: 'pending' }), operation({ category: 'À catégoriser', status: 'ignored' })], '2026-11');
+  assert.equal(result.totals.CHF, 24.7);
+  assert.equal(result.uncategorized, 2);
+  assert.equal(validateOperation(operation({ status: 'pending' })).status, 'validated');
+});
+
+test('rereading preserves categories, exclusions, identities and repeated purchases one-to-one', () => {
+  const old = [operation({ id: 'one', category: 'Alimentation', cardLast4: '3706', holder: 'Titulaire A' }),
+    operation({ id: 'two', category: 'Loisirs', cardLast4: '1819', status: 'ignored' }),
+    operation({ id: 'three', category: 'Autres', cardLast4: '3706' })];
+  const incoming = ['1819', '3706', '3706', '3706'].map((cardLast4, i) => operation({ id: 'new-' + i, cardLast4, category: 'À catégoriser', holder: '', status: 'validated' }));
+  const result = reconcileImport(incoming, old);
+  assert.deepEqual(result.map(o => [o.id, o.category, o.status]), [
+    ['two', 'Loisirs', 'ignored'], ['one', 'Alimentation', 'validated'], ['three', 'Autres', 'validated'], ['new-3', 'À catégoriser', 'validated'],
+  ]);
+  assert.equal(result[1].holder, 'Titulaire A');
+  const again = reconcileImport(incoming, result);
+  assert.deepEqual(again.map(o => o.id), result.map(o => o.id));
+  const legacy = reconcileImport([operation({ id: 'new', cardLast4: '3706', holder: 'Nouveau titulaire' })], [operation({ id: 'legacy', status: 'pending' })]);
+  assert.equal(legacy[0].id, 'legacy');
+  assert.equal(legacy[0].holder, 'Nouveau titulaire');
 });
 test('generic extraction retains page and raw text, rejects balances, ambiguous columns and invalid dates', () => {
   const rows = parsePages([{ num: 2, text: "02.11.2026 Migros 42.30 CHF\n03/11/2026 Loyer 1'650.00\n04.11.2026 Librairie -12,50 EUR\n31.02.2026 Impossible 12.00\n05.11.2026 Solde 500.00\n06.11.2026 Achat 20.00 30.00" }]);
@@ -53,6 +77,7 @@ async function withStore(t, handler) {
   const directory = await fs.mkdtemp(path.join(os.tmpdir(), 'mycompta-test-'));
   t.after(() => fs.rm(directory, { recursive: true, force: true }));
   const store = new GoogleStore({ directory, env: { GOOGLE_CLIENT_ID: 'test-client', GOOGLE_CLIENT_SECRET: 'test-secret' }, fetchImpl: handler });
+  store.ensureSuppliers = async () => {};
   await store.save('token', { access_token: 'test-token', expires_at: Date.now() + 3600000 });
   await store.save('resources', { folderId: 'folder', spreadsheetId: 'sheet' });
   return store;
@@ -138,7 +163,7 @@ test('setup initializes missing tabs without colliding with default tab, then ru
       updates++;
       const requests = JSON.parse(options.body).requests;
       for (const request of requests) if (request.addSheet) sheets.push({ properties: request.addSheet.properties });
-      assert.equal(requests.filter(r => r.addSheet).length, 5);
+      assert.equal(requests.filter(r => r.addSheet).length, 6);
       assert.ok(requests.filter(r => r.addSheet).every(r => r.addSheet.properties.sheetId >= 100));
       return json({});
     }
@@ -187,7 +212,7 @@ test('card identity survives validation and Sheets serialization', async t => {
 });
 
 test('HTTP flow: upload, deduplication, corrections, budgets and cross-origin protection', async t => {
-  const data = { documents: [], operations: [], budgets: [] };
+  const data = { documents: [], operations: [], budgets: [], suppliers: [{ id: 'migros', name: 'Migros', category: 'Alimentation' }] };
   let uploads = 0;
   const fake = { configured: true, status: async () => ({ configured: true, connected: true, ready: true }), read: async () => structuredClone(data),
     uploadPdf: async () => { uploads++; return { id: 'drive-pdf' }; },
@@ -207,7 +232,8 @@ test('HTTP flow: upload, deduplication, corrections, budgets and cross-origin pr
   assert.equal(response.status, 201);
   const imported = await response.json();
   assert.equal(imported.count, 1);
-  assert.equal(data.operations[0].status, 'pending');
+  assert.equal(data.operations[0].status, 'validated');
+  assert.equal(data.operations[0].category, 'Alimentation');
   response = await fetch(base + '/api/documents?name=test.pdf&source=UBS', { method: 'POST', headers: { 'X-MyCompta': '1', 'Content-Type': 'application/pdf' }, body: pdf('02.11.2026 Migros 42.30 CHF') });
   assert.equal((await response.json()).duplicate, true);
   assert.equal(uploads, 1);

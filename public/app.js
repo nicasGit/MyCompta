@@ -3,15 +3,18 @@ const esc = value => String(value ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;
 const money = (amount, currency = 'CHF') => new Intl.NumberFormat('fr-CH', { style: 'currency', currency }).format(amount);
 const today = () => new Date().toLocaleDateString('sv-SE');
 const state = { status: {}, data: { documents: [], operations: [], budgets: [], categories: [] }, view: 'dashboard', demo: false, editing: null, busy: false };
-const titles = { dashboard: ['Vue d’ensemble', 'Vos dépenses, avec un peu de recul.'], documents: ['Documents', 'Tous vos relevés, au même endroit.'], operations: ['Opérations', 'Le détail de votre quotidien.'], review: ['À vérifier', 'Quelques vérifications pour des comptes plus fiables.'], budgets: ['Budgets', 'Donnez un cap aux dépenses de votre foyer.'], settings: ['Mon espace Google', 'Vos données et vos documents, chez vous.'] };
+const titles = { dashboard: ['Vue d’ensemble', 'Vos dépenses, avec un peu de recul.'], documents: ['Documents', 'Tous vos relevés, au même endroit.'], operations: ['Opérations', 'Le détail de votre quotidien.'], review: ['À catégoriser', 'Classez vos opérations à votre rythme, sans bloquer les totaux.'], budgets: ['Budgets', 'Donnez un cap aux dépenses de votre foyer.'], settings: ['Mon espace Google', 'Vos données et vos documents, chez vous.'] };
 const categories = ['À catégoriser', 'Logement', 'Alimentation', 'Transports', 'Santé', 'Assurances', 'Loisirs', 'Abonnements', 'Impôts', 'Autres'];
-const labels = { pending: 'À vérifier', validated: 'Validée', ignored: 'Ignorée' };
+const labels = { pending: 'Incluse', validated: 'Incluse', ignored: 'Ignorée' };
 const typeLabels = { expense: 'Dépense', income: 'Revenu / remboursement', transfer: 'Virement', card_payment: 'Règlement de carte' };
+titles.suppliers = ['Fournisseurs et catégories', 'Le bon classement, automatiquement.'];
+state.editingSupplier = null;
 $('#month').value = today().slice(0, 7);
 $('#redirect-uri').textContent = `${location.origin}/auth/callback`;
 const options = values => values.map(v => `<option>${esc(v)}</option>`).join('');
 $('#operation-category').innerHTML = options(categories);
 $('#budget-category').innerHTML = options(categories.filter(c => c !== 'À catégoriser'));
+$('#supplier-category').innerHTML = options(categories.filter(c => c !== 'À catégoriser'));
 
 async function api(url, options = {}) {
   const response = await fetch(url, { ...options, headers: { 'X-MyCompta': '1', ...options.headers } });
@@ -29,13 +32,13 @@ async function action(fn, success) {
   if (state.busy) return;
   state.busy = true;
   document.body.setAttribute('aria-busy', 'true');
-  document.querySelectorAll('button[type="submit"],#setup,#disconnect,#refresh').forEach(b => { b.disabled = true; });
+  document.querySelectorAll('button[type="submit"],#setup,#disconnect,#refresh,#categorize-existing').forEach(b => { b.disabled = true; });
   try { await fn(); if (success) message(success); }
   catch (error) { message(error.message, true); }
   finally {
     state.busy = false;
     document.body.removeAttribute('aria-busy');
-    document.querySelectorAll('button[type="submit"],#setup,#disconnect,#refresh').forEach(b => { b.disabled = false; });
+    document.querySelectorAll('button[type="submit"],#setup,#disconnect,#refresh,#categorize-existing').forEach(b => { b.disabled = false; });
   }
 }
 function showView(view) {
@@ -53,12 +56,28 @@ document.addEventListener('click', event => {
   if (nav) showView(nav.dataset.view);
   const edit = event.target.closest('[data-edit]');
   if (edit) editOperation(state.data.operations.find(o => o.id === edit.dataset.edit));
+  const supplierEdit = event.target.closest('[data-edit-supplier]');
+  if (supplierEdit) editSupplier(supplierEdit.dataset.editSupplier);
+  const supplierDelete = event.target.closest('[data-delete-supplier]');
+  if (supplierDelete && requireStorage()) action(async () => {
+    await api('/api/suppliers/' + encodeURIComponent(supplierDelete.dataset.deleteSupplier), { method: 'DELETE' });
+    resetSupplierForm();
+    await load();
+    message('Règle supprimée. Les catégories des opérations existantes sont conservées.');
+  });
   const reanalyse = event.target.closest('[data-reanalyse]');
-  if (reanalyse && requireStorage() && window.confirm('Relire le détail Cembra ? Les opérations encore à vérifier de ce document seront remplacées, y compris leurs corrections et catégories. Les opérations validées ou ignorées bloquent la relecture.')) action(async () => {
+  const rename = event.target.closest('[data-rename]');
+  if (rename && requireStorage()) action(async () => {
+    message('Lecture de la date de facture et mise à jour du nom…');
+    const result = await api('/api/documents/' + encodeURIComponent(rename.dataset.rename) + '/rename', { method: 'POST' });
+    await load();
+    message(`Document renommé : ${result.name}`);
+  });
+  if (reanalyse && requireStorage() && window.confirm('Relire le détail Cembra ? Les lignes du document seront remplacées par la nouvelle extraction. Les catégories et exclusions seront conservées pour les opérations retrouvées ; les lignes sans correspondance seront remplacées.')) action(async () => {
     message('Relecture du détail Cembra depuis le PDF archivé…');
     const result = await api('/api/documents/' + encodeURIComponent(reanalyse.dataset.reanalyse) + '/reanalyse', { method: 'POST' });
     await load();
-    message(`${result.count} opération(s) Cembra à vérifier. ${result.note}`);
+    message(`${result.count} opération(s) Cembra relues et prises en compte. ${result.note}`);
   });
 });
 $('#import-shortcut').onclick = () => { showView('documents'); $('#upload-form select').focus(); };
@@ -78,16 +97,16 @@ function docRows(documents, compact = false) {
   return [...documents].reverse().map(d => {
     const url = state.demo ? null : pdfUrl(d);
     const reanalyse = !compact && !state.demo && d.source === 'Cembra'
-      ? `<p><button class="text-button" data-reanalyse="${esc(d.id)}">Relire le détail Cembra</button></p>` : '';
+      ? `<p><button class="text-button" data-reanalyse="${esc(d.id)}">Relire le détail Cembra</button></p><p><button class="text-button" data-rename="${esc(d.id)}">Renommer avec la date de facture</button></p>` : '';
     const operations = state.data.operations.filter(o => o.documentId === d.id);
-    const pending = operations.filter(o => o.status === 'pending').length;
-    const status = operations.length ? (pending ? `${pending} à vérifier` : 'Traité') : 'Saisie nécessaire';
+    const pending = operations.filter(o => o.status !== 'ignored' && o.category === 'À catégoriser').length;
+    const status = operations.length ? (pending ? `${pending} à catégoriser` : 'Traité') : 'Saisie nécessaire';
     return `<div class="document-row"><span class="pdf-icon">PDF</span><div class="document-info"><strong>${url ? `<a href="${esc(url)}" target="_blank" rel="noopener noreferrer">${esc(d.name)} ↗</a>` : esc(d.name)}</strong><small>${esc(d.source)} · ${esc(new Date(d.importedAt).toLocaleDateString('fr-CH'))} · ${operations.length} opération(s)</small>${!compact && d.note ? `<p>${esc(d.note)}</p>` : ''}${reanalyse}</div><span class="badge ${pending ? '' : operations.length ? 'validated' : ''}">${esc(status)}</span></div>`;
   }).join('');
 }
 function operationTable(operations) {
   if (!operations.length) return empty('Aucune opération à afficher', 'Les lignes importées apparaîtront ici.');
-  return `<table><thead><tr><th>Date</th><th>Libellé / compte</th><th>Titulaire</th><th>Catégorie</th><th>État</th><th class="amount">Montant</th><th></th></tr></thead><tbody>${operations.map(o => `<tr><td>${esc(o.date.split('-').reverse().join('.'))}</td><td class="label-cell" title="${esc(o.label)}">${esc(o.label)}<span class="subtext">${esc(o.account)} · ${esc(typeLabels[o.type] || o.type)}</span></td><td>${esc(o.holder || "Non renseigné")}<span class="subtext">${esc(o.cardLast4 ? "Carte " + o.cardLast4 : "")}</span></td><td>${esc(o.category)}</td><td><span class="badge ${esc(o.status)}">${esc(labels[o.status] || o.status)}</span></td><td class="amount">${esc(money(o.amount, o.currency))}</td><td><button class="text-button" data-edit="${esc(o.id)}">${o.status === 'pending' ? 'Vérifier' : 'Modifier'} →</button></td></tr>`).join('')}</tbody></table>`;
+  return `<table><thead><tr><th>Date</th><th>Libellé / compte</th><th>Titulaire</th><th>Catégorie</th><th>État</th><th class="amount">Montant</th><th></th></tr></thead><tbody>${operations.map(o => `<tr><td>${esc(o.date.split('-').reverse().join('.'))}</td><td class="label-cell" title="${esc(o.label)}">${esc(o.label)}<span class="subtext">${esc(o.account)} · ${esc(typeLabels[o.type] || o.type)}</span></td><td>${esc(o.holder || "Non renseigné")}<span class="subtext">${esc(o.cardLast4 ? "Carte " + o.cardLast4 : "")}</span></td><td>${esc(o.category)}</td><td><span class="badge ${esc(o.status)}">${esc(o.status !== "ignored" && o.category === "À catégoriser" ? "À catégoriser" : labels[o.status] || o.status)}</span></td><td class="amount">${esc(money(o.amount, o.currency))}</td><td><button class="text-button" data-edit="${esc(o.id)}">Modifier →</button></td></tr>`).join('')}</tbody></table>`;
 }
 function renderOperations() {
   const month = $('#month').value;
@@ -95,10 +114,10 @@ function renderOperations() {
   const filtered = state.data.operations.filter(o => o.date.startsWith(month)).sort((a, b) => b.date.localeCompare(a.date));
   $('#operations-list').innerHTML = operationTable(filtered.filter(o => `${o.label} ${o.account} ${o.holder || ""} ${o.cardLast4 || ""}`.toLocaleLowerCase('fr').includes(search)));
   $('#recent-operations').innerHTML = operationTable(filtered.slice(0, 5));
-  $('#review-list').innerHTML = operationTable(state.data.operations.filter(o => o.status === 'pending'));
+  $('#review-list').innerHTML = operationTable(state.data.operations.filter(o => o.status !== 'ignored' && o.category === 'À catégoriser'));
 }
 function summary() {
-  const expense = state.data.operations.filter(o => o.date.startsWith($('#month').value) && o.status === 'validated' && o.type === 'expense');
+  const expense = state.data.operations.filter(o => o.date.startsWith($('#month').value) && o.status !== 'ignored' && o.type === 'expense');
   const totals = {}, groups = {};
   expense.forEach(o => {
     totals[o.currency] = (totals[o.currency] || 0) + Math.round(o.amount * 100);
@@ -108,8 +127,9 @@ function summary() {
   return { expense, totals, groups };
 }
 function render() {
+  renderSuppliers();
   const { expense, totals, groups } = summary();
-  const pending = state.data.operations.filter(o => o.status === 'pending').length;
+  const pending = state.data.operations.filter(o => o.status !== 'ignored' && o.category === 'À catégoriser').length;
   $('#total').textContent = Object.entries(totals).map(([currency, amount]) => money(amount / 100, currency)).join('\n') || money(0);
   $('#count').textContent = expense.length;
   $('#pending').textContent = $('#nav-count').textContent = pending;
@@ -117,7 +137,7 @@ function render() {
   $('#category-chart').innerHTML = Object.entries(groups).sort((a, b) => b[1] - a[1]).map(([key, cents]) => {
     const [category, currency] = key.split('|');
     return `<div class="category-row"><div><span>${esc(category)}</span><strong>${esc(money(cents / 100, currency))}</strong></div><progress value="${cents}" max="${totals[currency]}" aria-label="${esc(category)}"></progress></div>`;
-  }).join('') || empty('Un premier relevé, une première vue', 'Validez des opérations pour voir leur répartition.');
+  }).join('') || empty('Un premier relevé, une première vue', 'Importez des opérations pour voir leur répartition.');
   $('#recent-documents').innerHTML = docRows(state.data.documents.slice(-3), true);
   $('#documents-list').innerHTML = docRows(state.data.documents);
   $('#document-count').textContent = `${state.data.documents.length} document(s)`;
@@ -166,7 +186,7 @@ $('#upload-form').onsubmit = event => {
     const result = await api('/api/documents?' + params, { method: 'POST', headers: { 'Content-Type': 'application/pdf' }, body: file });
     event.target.reset();
     await load();
-    message(result.duplicate ? 'Ce PDF a déjà été importé. Aucun doublon créé.' : `PDF archivé dans Drive. ${result.count} opération(s) à vérifier. ${result.note}`);
+    message(result.duplicate ? 'Ce PDF a déjà été importé. Aucun doublon créé.' : `PDF archivé dans Drive. ${result.count} opération(s) importées et prises en compte. ${result.note}`);
   });
 };
 function editOperation(operation) {
@@ -176,9 +196,9 @@ function editOperation(operation) {
   form.reset();
   $('#dialog-error').hidden = true;
   $('#operation-document').innerHTML = '<option value="">Sans document</option>' + state.data.documents.map(d => `<option value="${esc(d.id)}">${esc(d.name)}</option>`).join('');
-  const values = operation || { date: today(), currency: 'CHF', category: 'À catégoriser', type: 'expense', status: 'pending', account: '' };
+  const values = { ...(operation || { date: today(), currency: 'CHF', category: 'À catégoriser', type: 'expense', account: '' }), status: operation?.status === 'ignored' ? 'ignored' : 'validated' };
   Object.entries(values).forEach(([key, value]) => { if (form.elements.namedItem(key)) form.elements.namedItem(key).value = value; });
-  $('#dialog-title').textContent = operation ? 'Vérifier une opération' : 'Ajouter une opération';
+  $('#dialog-title').textContent = operation ? 'Modifier une opération' : 'Ajouter une opération';
   $('#operation-context').textContent = operation?.raw ? `Ligne d’origine · page ${operation.page} : ${operation.raw}` : 'Le montant est toujours positif. Choisissez le type pour préciser son sens.';
   updateOperationHints();
   $('#operation-dialog').showModal();
@@ -220,14 +240,59 @@ $('#demo').onclick = () => {
   state.demo = true;
   const month = $('#month').value;
   state.data = {
+    suppliers: [{ id: 'demo-coop', name: 'Coop', category: 'Alimentation' }, { id: 'demo-migros', name: 'Migros', category: 'Alimentation' }, { id: 'demo-cff', name: 'CFF', category: 'Transports' }],
     documents: [{ id: 'demo-doc', name: 'Relevé du foyer · exemple.pdf', source: 'Exemple', importedAt: new Date().toISOString() }],
-    operations: [['Loyer', 1650, 'Logement'], ['Migros', 142.80, 'Alimentation'], ['CFF', 85, 'Transports'], ['Assurance ménage', 46, 'Assurances'], ['Restaurant', 67.50, 'Loisirs'], ['À vérifier : pharmacie', 32, 'Santé']].map(([label, amount, category], i) => ({ id: 'demo-' + i, documentId: 'demo-doc', date: `${month}-${String(i + 1).padStart(2, '0')}`, label, amount, currency: 'CHF', category, type: 'expense', status: i === 5 ? 'pending' : 'validated', account: 'Compte du foyer' })),
+    operations: [['Loyer', 1650, 'Logement'], ['Migros', 142.80, 'Alimentation'], ['CFF', 85, 'Transports'], ['Assurance ménage', 46, 'Assurances'], ['Restaurant', 67.50, 'Loisirs'], ['Pharmacie', 32, 'Santé']].map(([label, amount, category], i) => ({ id: 'demo-' + i, documentId: 'demo-doc', date: `${month}-${String(i + 1).padStart(2, '0')}`, label, amount, currency: 'CHF', category: i === 5 ? 'À catégoriser' : category, type: 'expense', status: 'validated', account: 'Compte du foyer' })),
     budgets: [{ month, category: 'Alimentation', amount: 650 }, { month, category: 'Loisirs', amount: 250 }], categories,
   };
   $('#notice').hidden = true;
   render();
 };
 $('#exit-demo').onclick = () => { state.demo = false; action(load); };
+function renderSuppliers() {
+  const suppliers = state.data.suppliers || [];
+  const search = $('#supplier-search').value.toLocaleLowerCase('fr');
+  const filtered = suppliers.filter(s => `${s.name} ${s.category}`.toLocaleLowerCase('fr').includes(search));
+  $('#supplier-count').textContent = `${suppliers.length} fournisseur(s)`;
+  $('#suppliers-list').innerHTML = filtered.length ? `<table><thead><tr><th>Fournisseur / texte recherché</th><th>Catégorie automatique</th><th>Actions</th></tr></thead><tbody>${[...filtered].sort((a, b) => a.name.localeCompare(b.name, 'fr')).map(s => `<tr><td>${esc(s.name)}</td><td><span class="chip">${esc(s.category)}</span></td><td><div class="actions"><button class="text-button" data-edit-supplier="${esc(s.id)}">Modifier</button><button class="text-button" data-delete-supplier="${esc(s.id)}">Supprimer</button></div></td></tr>`).join('')}</tbody></table>` : empty('Aucun fournisseur à afficher', 'Ajoutez une règle pour automatiser le classement.');
+}
+function resetSupplierForm() {
+  state.editingSupplier = null;
+  $('#supplier-form').reset();
+  $('#save-supplier').textContent = 'Ajouter le fournisseur';
+  $('#cancel-supplier').hidden = true;
+}
+function editSupplier(id) {
+  if (!requireStorage()) return;
+  const supplier = state.data.suppliers?.find(s => s.id === id);
+  if (!supplier) return;
+  state.editingSupplier = id;
+  $('#supplier-form').elements.name.value = supplier.name;
+  $('#supplier-category').value = supplier.category;
+  $('#save-supplier').textContent = 'Enregistrer la règle';
+  $('#cancel-supplier').hidden = false;
+  $('#supplier-form').elements.name.focus();
+}
+$('#supplier-search').oninput = renderSuppliers;
+$('#cancel-supplier').onclick = resetSupplierForm;
+$('#supplier-form').onsubmit = event => {
+  event.preventDefault();
+  if (!requireStorage()) return;
+  const value = Object.fromEntries(new FormData(event.target));
+  action(async () => {
+    await api('/api/suppliers' + (state.editingSupplier ? '/' + encodeURIComponent(state.editingSupplier) : ''), { method: state.editingSupplier ? 'PUT' : 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(value) });
+    resetSupplierForm();
+    await load();
+  }, 'Règle enregistrée. Elle sera appliquée aux prochains imports.');
+};
+$('#categorize-existing').onclick = () => {
+  if (!requireStorage()) return;
+  action(async () => {
+    const result = await api('/api/categorize', { method: 'POST' });
+    await load();
+    message(`${result.updated} opération(s) catégorisée(s). Les catégories déjà renseignées sont conservées.`);
+  });
+};
 const errorCode = new URLSearchParams(location.search).get('error');
 if (errorCode) { message(errorCode === 'configuration' ? 'Renseignez la configuration Google avant de vous connecter.' : errorCode === 'compte' ? 'Cet espace appartient à un autre compte Google. Reconnectez le compte utilisé pour créer votre espace MyCompta.' : 'La connexion Google n’a pas abouti. Vérifiez les autorisations, le client OAuth et l’URI de redirection, puis réessayez.', true); history.replaceState(null, '', '/'); showView('settings'); }
 action(load);

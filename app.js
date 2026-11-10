@@ -2,8 +2,9 @@ const express = require('express');
 const path = require('node:path');
 const crypto = require('node:crypto');
 const { GoogleStore } = require('./google/store');
-const { extractPdf } = require('./services/pdf');
+const { extractPdf, suggestPdfName } = require('./services/pdf');
 const { validateOperation, summarize, CATEGORIES } = require('./services/operations');
+const { validateSupplier, categorizeOperation } = require('./services/suppliers');
 const { exec } = require("child_process");
 
 try { process.loadEnvFile(); } catch (error) { if (error.code !== 'ENOENT') throw error; }
@@ -72,15 +73,17 @@ function createApp(store = new GoogleStore()) {
       const existing = data.documents.find(d => d.hash === hash);
       if (existing) return { duplicate: true, document: existing };
       const parsed = await extractPdf(req.body, source);
-      const file = await store.uploadPdf(req.body, name, hash);
+      const storedName = parsed.suggestedName || name;
+      const file = await store.uploadPdf(req.body, storedName, hash);
+      if (parsed.suggestedName) await store.renamePdf(file.id, storedName);
       const document = {
-        id: crypto.randomUUID(), name, source, driveId: file.id, hash,
-        importedAt: new Date().toISOString(), status: parsed.operations.length ? 'À vérifier' : 'Saisie nécessaire', note: parsed.note
+        id: crypto.randomUUID(), name: storedName, source, driveId: file.id, hash,
+        importedAt: new Date().toISOString(), status: parsed.operations.length ? 'Importé' : 'Saisie nécessaire', note: parsed.note
       };
-      const operations = parsed.operations.map(o => ({
+      const operations = parsed.operations.map(o => categorizeOperation({
         ...o, id: crypto.randomUUID(), documentId: document.id,
-        account: source, category: 'À catégoriser', type: o.type || 'expense', status: 'pending'
-      }));
+        account: source, category: 'À catégoriser', type: o.type || 'expense', status: 'validated'
+      }, data.suppliers));
       await store.appendImport(document, operations);
       return { document, count: operations.length, note: parsed.note };
     });
@@ -91,7 +94,7 @@ function createApp(store = new GoogleStore()) {
     const result = await serialize(async () => {
       const data = await store.read();
       if (operation.documentId && !data.documents.some(d => d.id === operation.documentId)) throw Object.assign(new Error('Document introuvable.'), { status: 400 });
-      return store.saveOperation({ ...operation, id: crypto.randomUUID() });
+      return store.saveOperation(categorizeOperation({ ...operation, id: crypto.randomUUID() }, data.suppliers));
     });
     res.status(201).json(result);
   });
@@ -101,14 +104,28 @@ function createApp(store = new GoogleStore()) {
       const document = data.documents.find(d => d.id === req.params.id);
       if (!document) throw Object.assign(new Error('Document introuvable.'), { status: 404 });
       if (document.source !== 'Cembra') throw Object.assign(new Error('Cette relecture est réservée aux relevés Cembra.'), { status: 400 });
-      if (data.operations.some(o => o.documentId === document.id && o.status !== 'pending')) throw Object.assign(new Error('Ce document contient des opérations déjà validées ou ignorées. La relecture est bloquée pour préserver vos décisions.'), { status: 409 });
       const buffer = await store.downloadPdf(document.driveId);
       const parsed = await extractPdf(buffer, 'Cembra');
       if (!parsed.operations.length) throw Object.assign(new Error(parsed.note + ' Les opérations existantes sont conservées.'), { status: 422 });
       const operations = parsed.operations.map(o => ({ ...o, id: crypto.randomUUID(), documentId: document.id,
-        account: 'Cembra', category: 'À catégoriser', type: o.type, status: 'pending' }));
-      await store.replacePendingImport({ ...document, note: parsed.note, status: 'À vérifier' }, operations);
+        account: 'Cembra', category: 'À catégoriser', type: o.type, status: 'validated' }));
+      const storedName = parsed.suggestedName || document.name;
+      if (storedName !== document.name) await store.renamePdf(document.driveId, storedName);
+      await store.replaceImport({ ...document, name: storedName, note: parsed.note, status: 'Importé' }, operations);
       return { count: operations.length, note: parsed.note };
+    });
+    res.json(result);
+  });
+  app.post('/api/documents/:id/rename', async (req, res) => {
+    const result = await serialize(async () => {
+      const data = await store.read();
+      const document = data.documents.find(d => d.id === req.params.id);
+      if (!document) throw Object.assign(new Error('Document introuvable.'), { status: 404 });
+      if (document.source !== 'Cembra') throw Object.assign(new Error('Le nom automatique est disponible pour Cembra.'), { status: 400 });
+      const name = await suggestPdfName(await store.downloadPdf(document.driveId));
+      if (!name) throw Object.assign(new Error('Date de facture absente ou ambiguë. Le nom actuel est conservé.'), { status: 422 });
+      await store.renameDocument(document.id, name);
+      return { name };
     });
     res.json(result);
   });
@@ -123,6 +140,16 @@ function createApp(store = new GoogleStore()) {
     }
     res.json(await serialize(() => store.saveBudget({ month, category, amount: Math.round(amount * 100) / 100 })));
   });
+  app.post('/api/suppliers', async (req, res) => {
+    const supplier = { ...validateSupplier(req.body), id: crypto.randomUUID() };
+    res.status(201).json(await serialize(() => store.saveSupplier(supplier)));
+  });
+  app.put('/api/suppliers/:id', async (req, res) => {
+    const supplier = { ...validateSupplier(req.body), id: req.params.id };
+    res.json(await serialize(() => store.saveSupplier(supplier, true)));
+  });
+  app.delete('/api/suppliers/:id', async (req, res) => res.json(await serialize(() => store.deleteSupplier(req.params.id))));
+  app.post('/api/categorize', async (req, res) => res.json(await serialize(() => store.categorizeOperations())));
   app.use(express.static(path.join(__dirname, 'public')));
   app.use((error, req, res, next) => {
     const status = error.type === 'entity.too.large' ? 413 : error.status || 500;
