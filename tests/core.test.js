@@ -158,6 +158,34 @@ test('Sheets reads reject altered headers and invalid financial rows instead of 
   await assert.rejects(() => store.read(), /ligne 2/);
 });
 
+test('legacy Sheets adds card identity headers without changing existing operation cells', async t => {
+  const values = TABLES.Operations.slice(0, 12).map(key => operation()[key] ?? '');
+  const calls = [];
+  const store = await withStore(t, async (url, options) => {
+    if (options.method === 'PUT') { calls.push([url, JSON.parse(options.body)]); return json({}); }
+    return json({ valueRanges: Object.entries(TABLES).map(([name, columns]) => ({ values: name === 'Operations' ? [columns.slice(0, 12), [...values]] : [[...columns]] })) });
+  });
+  const data = await store.read();
+  assert.equal(data.operations[0].holder, '');
+  assert.equal(data.operations[0].amount, operation().amount);
+  assert.equal(calls.length, 1);
+  assert.ok(calls[0][0].endsWith('/values/Operations!M1:O1?valueInputOption=RAW'));
+  assert.deepEqual(calls[0][1], { values: [['holder', 'cardLast4', 'cardType']] });
+  values.push('existing custom content');
+  await assert.rejects(() => store.read(), /déjà utilisées/);
+  assert.equal(calls.length, 1);
+});
+
+test('card identity survives validation and Sheets serialization', async t => {
+  const value = validateOperation(operation({ holder: 'FLORENCE GALLEZ', cardLast4: '3706', cardType: 'principale' }));
+  assert.equal(value.holder, 'FLORENCE GALLEZ');
+  assert.throws(() => validateOperation(operation({ cardLast4: '1234567890123456' })));
+  let request;
+  const store = await withStore(t, async (url, options) => { request = JSON.parse(options.body); return json({}); });
+  await store.writeRow('Operations', value, 3);
+  assert.deepEqual(request.values[0].slice(12), ['FLORENCE GALLEZ', '3706', 'principale']);
+});
+
 test('HTTP flow: upload, deduplication, corrections, budgets and cross-origin protection', async t => {
   const data = { documents: [], operations: [], budgets: [] };
   let uploads = 0;

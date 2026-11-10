@@ -17,13 +17,19 @@ function parsePages(pages) {
   }
   return operations;
 }
-async function extractPdf(buffer) {
+async function extractPdf(buffer, source = 'Autre') {
   const { PDFParse } = require('pdf-parse');
   const parser = new PDFParse({ data: new Uint8Array(buffer) });
   try {
-    const result = await parser.getText();
-    const operations = parsePages(result.pages);
+    const cembra = source === 'Cembra'
+      ? require('../parsers/cembra').parseCembraTables((await parser.getTable()).pages,
+        (await parser.getText({ lineEnforce: true, cellSeparator: ' ', itemJoiner: ' ' })).pages)
+      : null;
+    const operations = cembra ? cembra.operations : parsePages((await parser.getText()).pages);
     if (operations.length > 2000) throw Object.assign(new Error('Ce document contient trop de lignes. Importez un relevé plus court.'), { status: 400 });
+    if (cembra) return { operations, note: operations.length
+      ? `Cembra : détail des transactions uniquement, sur toutes les pages. Date de transaction retenue ; date de comptabilisation et colonnes crédit/débit conservées dans la ligne d’origine. ${cembra.rejected} ligne(s) ambiguë(s) non importée(s). Vérifiez les opérations avant validation.`
+      : `Aucun détail Cembra exploitable trouvé. Seul le tableau Date de trans. / Date de com. / Description / Crédit CHF / Débit CHF est accepté. ${cembra.rejected} ligne(s) ambiguë(s) non importée(s). Le PDF est archivé, sans reprise des soldes ou récapitulatifs. Les scans nécessitent un OCR.` };
     return { operations, note: operations.length
       ? 'Extraction indicative : vérifiez les dates, montants, devises et le sens de chaque opération dans le PDF. Les formats bancaires ne sont pas encore certifiés.'
       : 'Aucune ligne reconnue. Le PDF est archivé ; saisissez les opérations manuellement. Les scans nécessitent un OCR, non inclus dans cette V1.' };

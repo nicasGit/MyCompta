@@ -5,7 +5,7 @@ const { CATEGORIES, validateOperation } = require('../services/operations');
 
 const TABLES = {
   Documents: ['id', 'name', 'source', 'driveId', 'hash', 'importedAt', 'status', 'note'],
-  Operations: ['id', 'documentId', 'date', 'label', 'amount', 'currency', 'account', 'category', 'type', 'status', 'page', 'raw'],
+  Operations: ['id', 'documentId', 'date', 'label', 'amount', 'currency', 'account', 'category', 'type', 'status', 'page', 'raw', 'holder', 'cardLast4', 'cardType'],
   Comptes: ['id', 'name', 'source', 'currency'],
   Categories: ['name', 'rule'],
   Budgets: ['month', 'category', 'amount'],
@@ -165,8 +165,17 @@ class GoogleStore {
   async read() {
     const { base } = await this.context();
     const params = new URLSearchParams({ valueRenderOption: 'UNFORMATTED_VALUE', dateTimeRenderOption: 'FORMATTED_STRING' });
-    for (const name of Object.keys(TABLES)) params.append('ranges', `${name}!A:L`);
+    for (const name of Object.keys(TABLES)) params.append('ranges', `${name}!A:O`);
     const result = await this.request(base + '/values:batchGet?' + params);
+    const operationsHeader = result.valueRanges[1]?.values?.[0];
+    // Append only the new columns; never overwrite existing headers or financial rows.
+    if (operationsHeader && TABLES.Operations.slice(0, 12).every((c, i) => operationsHeader[i] === c) &&
+      TABLES.Operations.slice(12).every((c, i) => !operationsHeader[i + 12])) {
+      const operationRows = result.valueRanges[1].values;
+      if (operationRows.slice(1).some(row => row.slice(12, 15).some(value => value !== '' && value != null))) throw fail('Les colonnes M à O sont déjà utilisées. Déplacez leur contenu avant d’ajouter le titulaire.', 409);
+      await this.json(base + '/values/Operations!M1:O1?valueInputOption=RAW', 'PUT', { values: [TABLES.Operations.slice(12)] });
+      operationsHeader.splice(12, 3, ...TABLES.Operations.slice(12));
+    }
     const data = {};
     Object.entries(TABLES).forEach(([name, columns], index) => {
       const values = result.valueRanges[index].values || [];
@@ -199,6 +208,28 @@ class GoogleStore {
     const suffix = row ? `/${encodeURIComponent(range)}?valueInputOption=RAW` : `/${table}!A1:append?valueInputOption=RAW&insertDataOption=INSERT_ROWS`;
     await this.json(base + '/values' + suffix, row ? 'PUT' : 'POST', { values: [rowFor(table, value)] });
     return value;
+  }
+  async downloadPdf(id) {
+    const response = await this.request(`https://www.googleapis.com/drive/v3/files/${encodeURIComponent(id)}?alt=media`, { rawResponse: true });
+    const max = 15 * 1024 * 1024;
+    if (Number(response.headers.get('content-length')) > max) throw fail('Le PDF dépasse 15 Mo.');
+    const buffer = Buffer.from(await response.arrayBuffer());
+    if (buffer.length > max || !buffer.subarray(0, 1024).includes(Buffer.from('%PDF-'))) throw fail('Le fichier Drive n’est pas un PDF valide de 15 Mo maximum.');
+    return buffer;
+  }
+  async replacePendingImport(document, operations) {
+    const data = await this.read();
+    const existing = data.documents.find(d => d.id === document.id);
+    if (!existing) throw fail('Document introuvable.', 404);
+    const old = data.operations.filter(o => o.documentId === document.id);
+    if (old.some(o => o.status !== 'pending')) throw fail('Des opérations ont déjà été validées ou ignorées. Relecture annulée.', 409);
+    const { base } = await this.context();
+    const metadata = await this.request(base + '?fields=sheets.properties');
+    const id = name => metadata.sheets.find(s => s.properties.title === name).properties.sheetId;
+    const requests = old.sort((a, b) => b._row - a._row).map(o => ({ deleteDimension: { range: { sheetId: id('Operations'), dimension: 'ROWS', startIndex: o._row - 1, endIndex: o._row } } }));
+    requests.push({ updateCells: { start: { sheetId: id('Documents'), rowIndex: existing._row - 1, columnIndex: 0 }, rows: [cells(rowFor('Documents', document))], fields: 'userEnteredValue' } });
+    if (operations.length) requests.push({ appendCells: { sheetId: id('Operations'), rows: operations.map(o => cells(rowFor('Operations', o))), fields: 'userEnteredValue' } });
+    await this.json(base + ':batchUpdate', 'POST', { requests });
   }
   async saveOperation(operation, update = false) {
     const data = await this.read();

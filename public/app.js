@@ -53,6 +53,13 @@ document.addEventListener('click', event => {
   if (nav) showView(nav.dataset.view);
   const edit = event.target.closest('[data-edit]');
   if (edit) editOperation(state.data.operations.find(o => o.id === edit.dataset.edit));
+  const reanalyse = event.target.closest('[data-reanalyse]');
+  if (reanalyse && requireStorage() && window.confirm('Relire le détail Cembra ? Les opérations encore à vérifier de ce document seront remplacées, y compris leurs corrections et catégories. Les opérations validées ou ignorées bloquent la relecture.')) action(async () => {
+    message('Relecture du détail Cembra depuis le PDF archivé…');
+    const result = await api('/api/documents/' + encodeURIComponent(reanalyse.dataset.reanalyse) + '/reanalyse', { method: 'POST' });
+    await load();
+    message(`${result.count} opération(s) Cembra à vérifier. ${result.note}`);
+  });
 });
 $('#import-shortcut').onclick = () => { showView('documents'); $('#upload-form select').focus(); };
 $('#month').onchange = () => { if (state.demo) render(); else action(load); };
@@ -70,21 +77,23 @@ function docRows(documents, compact = false) {
   if (!documents.length) return empty('Votre bibliothèque commence ici', 'Importez votre premier relevé PDF.');
   return [...documents].reverse().map(d => {
     const url = state.demo ? null : pdfUrl(d);
+    const reanalyse = !compact && !state.demo && d.source === 'Cembra'
+      ? `<p><button class="text-button" data-reanalyse="${esc(d.id)}">Relire le détail Cembra</button></p>` : '';
     const operations = state.data.operations.filter(o => o.documentId === d.id);
     const pending = operations.filter(o => o.status === 'pending').length;
     const status = operations.length ? (pending ? `${pending} à vérifier` : 'Traité') : 'Saisie nécessaire';
-    return `<div class="document-row"><span class="pdf-icon">PDF</span><div class="document-info"><strong>${url ? `<a href="${esc(url)}" target="_blank" rel="noopener noreferrer">${esc(d.name)} ↗</a>` : esc(d.name)}</strong><small>${esc(d.source)} · ${esc(new Date(d.importedAt).toLocaleDateString('fr-CH'))} · ${operations.length} opération(s)</small>${!compact && d.note ? `<p>${esc(d.note)}</p>` : ''}</div><span class="badge ${pending ? '' : operations.length ? 'validated' : ''}">${esc(status)}</span></div>`;
+    return `<div class="document-row"><span class="pdf-icon">PDF</span><div class="document-info"><strong>${url ? `<a href="${esc(url)}" target="_blank" rel="noopener noreferrer">${esc(d.name)} ↗</a>` : esc(d.name)}</strong><small>${esc(d.source)} · ${esc(new Date(d.importedAt).toLocaleDateString('fr-CH'))} · ${operations.length} opération(s)</small>${!compact && d.note ? `<p>${esc(d.note)}</p>` : ''}${reanalyse}</div><span class="badge ${pending ? '' : operations.length ? 'validated' : ''}">${esc(status)}</span></div>`;
   }).join('');
 }
 function operationTable(operations) {
   if (!operations.length) return empty('Aucune opération à afficher', 'Les lignes importées apparaîtront ici.');
-  return `<table><thead><tr><th>Date</th><th>Libellé / compte</th><th>Catégorie</th><th>État</th><th class="amount">Montant</th><th></th></tr></thead><tbody>${operations.map(o => `<tr><td>${esc(o.date.split('-').reverse().join('.'))}</td><td class="label-cell" title="${esc(o.label)}">${esc(o.label)}<span class="subtext">${esc(o.account)} · ${esc(typeLabels[o.type] || o.type)}</span></td><td>${esc(o.category)}</td><td><span class="badge ${esc(o.status)}">${esc(labels[o.status] || o.status)}</span></td><td class="amount">${esc(money(o.amount, o.currency))}</td><td><button class="text-button" data-edit="${esc(o.id)}">${o.status === 'pending' ? 'Vérifier' : 'Modifier'} →</button></td></tr>`).join('')}</tbody></table>`;
+  return `<table><thead><tr><th>Date</th><th>Libellé / compte</th><th>Titulaire</th><th>Catégorie</th><th>État</th><th class="amount">Montant</th><th></th></tr></thead><tbody>${operations.map(o => `<tr><td>${esc(o.date.split('-').reverse().join('.'))}</td><td class="label-cell" title="${esc(o.label)}">${esc(o.label)}<span class="subtext">${esc(o.account)} · ${esc(typeLabels[o.type] || o.type)}</span></td><td>${esc(o.holder || "Non renseigné")}<span class="subtext">${esc(o.cardLast4 ? "Carte " + o.cardLast4 : "")}</span></td><td>${esc(o.category)}</td><td><span class="badge ${esc(o.status)}">${esc(labels[o.status] || o.status)}</span></td><td class="amount">${esc(money(o.amount, o.currency))}</td><td><button class="text-button" data-edit="${esc(o.id)}">${o.status === 'pending' ? 'Vérifier' : 'Modifier'} →</button></td></tr>`).join('')}</tbody></table>`;
 }
 function renderOperations() {
   const month = $('#month').value;
   const search = $('#search').value.toLocaleLowerCase('fr');
   const filtered = state.data.operations.filter(o => o.date.startsWith(month)).sort((a, b) => b.date.localeCompare(a.date));
-  $('#operations-list').innerHTML = operationTable(filtered.filter(o => `${o.label} ${o.account}`.toLocaleLowerCase('fr').includes(search)));
+  $('#operations-list').innerHTML = operationTable(filtered.filter(o => `${o.label} ${o.account} ${o.holder || ""} ${o.cardLast4 || ""}`.toLocaleLowerCase('fr').includes(search)));
   $('#recent-operations').innerHTML = operationTable(filtered.slice(0, 5));
   $('#review-list').innerHTML = operationTable(state.data.operations.filter(o => o.status === 'pending'));
 }
@@ -192,6 +201,7 @@ $('#operation-form').onsubmit = event => {
   const form = event.target;
   const operation = Object.fromEntries(new FormData(form));
   operation.amount = Number(operation.amount);
+  operation.cardType = state.editing?.cardType || "";
   operation.page = operation.documentId === state.editing?.documentId ? state.editing.page : 0;
   operation.raw = operation.documentId === state.editing?.documentId ? state.editing.raw : '';
   action(async () => {
