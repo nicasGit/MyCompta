@@ -2,6 +2,7 @@ const fs = require('node:fs/promises');
 const path = require('node:path');
 const crypto = require('node:crypto');
 const { CATEGORIES, validateOperation, reconcileImport } = require('../services/operations');
+const { categoryNames, validateCategory, categoryKey } = require('../services/categories');
 const { DEFAULT_SUPPLIERS, normalizeSupplier, validateSupplier, categorizeOperation } = require('../services/suppliers');
 const { runtimeConfig } = require('../services/config');
 
@@ -201,21 +202,29 @@ class GoogleStore {
       if (columns.some((column, i) => values[0]?.[i] !== column)) throw fail(`Structure de l’onglet ${name} modifiée. Rétablissez les en-têtes d’origine.`, 409);
       data[name] = values.slice(1).map((row, i) => ({ ...Object.fromEntries(columns.map((key, j) => [key, row[j] ?? ''])), _row: i + 2 })).filter(row => row[columns[0]] !== '');
     });
+    const allowedCategories = categoryNames(data.Categories);
     const operations = data.Operations.map(o => {
-      try { return { ...o, ...validateOperation({ ...o, amount: Number(o.amount), page: Number(o.page) }) }; }
+      try { return { ...o, ...validateOperation({ ...o, amount: Number(o.amount), page: Number(o.page) }, allowedCategories) }; }
       catch (error) { throw fail(`Opération invalide dans Sheets, ligne ${o._row} : ${error.message}`, 409); }
     });
     const budgets = data.Budgets.map(b => {
       const amount = Number(b.amount);
-      if (!/^\d{4}-(0[1-9]|1[0-2])$/.test(b.month) || !CATEGORIES.includes(b.category) || !Number.isFinite(amount) || amount < 0) throw fail(`Budget invalide dans Sheets, ligne ${b._row}.`, 409);
+      if (!/^\d{4}-(0[1-9]|1[0-2])$/.test(b.month) || !allowedCategories.includes(b.category) || !Number.isFinite(amount) || amount < 0) throw fail(`Budget invalide dans Sheets, ligne ${b._row}.`, 409);
       return { ...b, amount };
     });
     const suppliers = data.Fournisseurs.map(s => {
-      try { return { ...s, ...validateSupplier(s) }; }
+      try { return { ...s, ...validateSupplier(s, allowedCategories) }; }
       catch (error) { throw fail(`Fournisseur invalide dans Sheets, ligne ${s._row} : ${error.message}`, 409); }
     });
     if (new Set(suppliers.map(s => s.id)).size !== suppliers.length || new Set(suppliers.map(s => normalizeSupplier(s.name))).size !== suppliers.length) throw fail('Des fournisseurs sont en double dans Sheets. Corrigez les doublons dans l’onglet Fournisseurs.', 409);
     return { documents: data.Documents, operations, accounts: data.Comptes, categories: data.Categories, budgets, suppliers };
+  }
+  async addCategory(input) {
+    const name = validateCategory(input);
+    const data = await this.read();
+    if (categoryNames(data.categories).some(existing => categoryKey(existing) === categoryKey(name))) throw fail('Cette catégorie existe déjà.', 409);
+    await this.writeRow('Categories', { name, rule: '' });
+    return { name };
   }
   async ensureSuppliers() {
     if (this.suppliersReady) return;
@@ -235,7 +244,7 @@ class GoogleStore {
   }
   async saveSupplier(supplier, update = false) {
     const data = await this.read();
-    const value = { ...validateSupplier(supplier), id: supplier.id };
+    const value = { ...validateSupplier(supplier, categoryNames(data.categories)), id: supplier.id };
     const old = data.suppliers.find(s => s.id === value.id);
     if (update && !old) throw fail('Fournisseur introuvable.', 404);
     if (data.suppliers.some(s => s.id !== value.id && normalizeSupplier(s.name) === normalizeSupplier(value.name))) throw fail('Ce fournisseur possède déjà une règle. Modifiez la règle existante.', 409);

@@ -3,8 +3,9 @@ const path = require('node:path');
 const crypto = require('node:crypto');
 const { GoogleStore } = require('./google/store');
 const { extractPdf, suggestPdfName } = require('./services/pdf');
-const { validateOperation, summarize, CATEGORIES } = require('./services/operations');
+const { validateOperation, summarize } = require('./services/operations');
 const { validateSupplier, categorizeOperation } = require('./services/suppliers');
+const { categoryNames } = require('./services/categories');
 const { exec } = require("child_process");
 const { runtimeConfig } = require('./services/config');
 const { Household } = require('./services/household');
@@ -115,7 +116,7 @@ function createApp(store = new GoogleStore(), config = runtimeConfig()) {
   });
   app.get('/api/data', async (req, res) => {
     const data = await store.read();
-    res.json({ ...data, categories: CATEGORIES, summary: summarize(data.operations, req.query.month) });
+    res.json({ ...data, categories: categoryNames(data.categories), summary: summarize(data.operations, req.query.month) });
   });
   app.post('/api/documents', express.raw({ type: 'application/pdf', limit: '15mb' }), async (req, res) => {
     if (!Buffer.isBuffer(req.body) || !req.body.subarray(0, 1024).includes(Buffer.from('%PDF-'))) {
@@ -147,7 +148,7 @@ function createApp(store = new GoogleStore(), config = runtimeConfig()) {
     res.status(result.duplicate ? 200 : 201).json(result);
   });
   app.post('/api/operations', async (req, res) => {
-    const operation = validateOperation(req.body);
+    const operation = validateOperation(req.body, categoryNames((await store.read()).categories));
     const result = await serialize(async () => {
       const data = await store.read();
       if (operation.documentId && !data.documents.some(d => d.id === operation.documentId)) throw Object.assign(new Error('Document introuvable.'), { status: 400 });
@@ -187,25 +188,28 @@ function createApp(store = new GoogleStore(), config = runtimeConfig()) {
     res.json(result);
   });
   app.put('/api/operations/:id', async (req, res) => {
-    const operation = validateOperation(req.body);
+    const operation = validateOperation(req.body, categoryNames((await store.read()).categories));
     res.json(await serialize(() => store.saveOperation({ ...operation, id: req.params.id }, true)));
   });
   app.post('/api/budgets', async (req, res) => {
     const { month, category, amount } = req.body;
-    if (!/^\d{4}-(0[1-9]|1[0-2])$/.test(month || '') || !CATEGORIES.includes(category) || typeof amount !== 'number' || !Number.isFinite(amount) || amount < 0) {
+    if (!/^\d{4}-(0[1-9]|1[0-2])$/.test(month || '') || !categoryNames((await store.read()).categories).includes(category) || typeof amount !== 'number' || !Number.isFinite(amount) || amount < 0) {
       return res.status(400).json({ error: 'Mois, catégorie ou montant du budget invalide.' });
     }
     res.json(await serialize(() => store.saveBudget({ month, category, amount: Math.round(amount * 100) / 100 })));
   });
   app.post('/api/suppliers', async (req, res) => {
-    const supplier = { ...validateSupplier(req.body), id: crypto.randomUUID() };
+    const supplier = { ...validateSupplier(req.body, categoryNames((await store.read()).categories)), id: crypto.randomUUID() };
     res.status(201).json(await serialize(() => store.saveSupplier(supplier)));
   });
   app.put('/api/suppliers/:id', async (req, res) => {
-    const supplier = { ...validateSupplier(req.body), id: req.params.id };
+    const supplier = { ...validateSupplier(req.body, categoryNames((await store.read()).categories)), id: req.params.id };
     res.json(await serialize(() => store.saveSupplier(supplier, true)));
   });
   app.delete('/api/suppliers/:id', async (req, res) => res.json(await serialize(() => store.deleteSupplier(req.params.id))));
+  app.post('/api/categories', async (req, res) => {
+    res.status(201).json(await serialize(() => store.addCategory(req.body.name)));
+  });
   app.post('/api/categorize', async (req, res) => res.json(await serialize(() => store.categorizeOperations())));
   app.use(express.static(path.join(__dirname, 'public'), { setHeaders(res, file) {
     if (/\.(?:html|js|css|webmanifest)$/.test(file)) res.setHeader('Cache-Control', 'no-cache');

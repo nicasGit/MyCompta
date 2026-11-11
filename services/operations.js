@@ -1,5 +1,5 @@
 const CATEGORIES = ['À catégoriser', 'Logement', 'Alimentation', 'Transports', 'Santé', 'Assurances', 'Loisirs', 'Abonnements', 'Impôts', 'Autres'];
-function validateOperation(input) {
+function validateOperation(input, categories = CATEGORIES) {
   const fail = message => { throw Object.assign(new Error(message), { status: 400 }); };
   if (!input || typeof input !== 'object') fail('Opération invalide.');
   const date = String(input.date || '');
@@ -8,7 +8,7 @@ function validateOperation(input) {
   if (Math.round(input.amount * 100) < 1) fail('Le montant minimum est de 0.01.');
   const label = String(input.label || '').trim();
   if (!label || label.length > 500) fail('Libellé requis (500 caractères maximum).');
-  if (!CATEGORIES.includes(input.category)) fail('Catégorie invalide.');
+  if (!categories.includes(input.category)) fail('Catégorie invalide.');
   if (!['expense', 'income', 'transfer', 'card_payment'].includes(input.type)) fail('Type invalide.');
   if (!['pending', 'validated', 'ignored'].includes(input.status)) fail('État invalide.');
   if (!['CHF', 'EUR', 'USD', 'GBP'].includes(input.currency)) fail('Devise non prise en charge.');

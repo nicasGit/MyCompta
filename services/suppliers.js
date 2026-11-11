@@ -10,10 +10,10 @@ function normalizeSupplier(value) {
   return String(value || '').normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase()
     .replace(/[^\p{L}\p{N}]+/gu, ' ').trim();
 }
-function validateSupplier(value) {
+function validateSupplier(value, categories = CATEGORIES) {
   const name = typeof value?.name === 'string' ? value.name.trim().replace(/\s+/g, ' ') : '';
   if (name.length > 120 || normalizeSupplier(name).length < 2) throw Object.assign(new Error('Indiquez un fournisseur de 2 à 120 caractères.'), { status: 400 });
-  if (!CATEGORIES.includes(value.category) || value.category === 'À catégoriser') throw Object.assign(new Error('Choisissez une catégorie pour ce fournisseur.'), { status: 400 });
+  if (!categories.includes(value.category) || value.category === 'À catégoriser') throw Object.assign(new Error('Choisissez une catégorie pour ce fournisseur.'), { status: 400 });
   return { name, category: value.category };
 }
 function matchingSupplier(label, suppliers = []) {

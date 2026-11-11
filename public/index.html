@@ -37,6 +37,12 @@
           <p id="appearance-status" class="footnote" role="status">Ce choix est enregistré sur cet appareil. Chaque membre peut choisir son ambiance.</p>
           <button type="button" class="secondary" data-view="settings">Gérer mon espace Google →</button>
         </article>
+        <article class="panel appearance-panel">
+          <h2>Catégories du foyer</h2><p class="muted">Ajoutez vos catégories : elles sont partagées avec le foyer et disponibles immédiatement dans les opérations, les fournisseurs et les budgets.</p>
+          <form id="category-form" class="upload-form"><label>Nouvelle catégorie<input name="name" maxlength="80" placeholder="Ex. Animaux, Enfants, Vacances…" required></label><button type="submit" class="primary">Ajouter la catégorie</button></form>
+          <div id="category-list" class="actions" aria-label="Catégories disponibles"></div>
+          <p class="footnote">Les catégories sont conservées dans votre Google Sheets. Pour classer automatiquement les dépenses, associez ensuite un fournisseur à cette catégorie dans Fournisseurs.</p>
+        </article>
       </section>
       <section id="view-dashboard">
         <div class="stats"><article class="stat"><span><span id="expense-period-title">Dépenses du mois</span> <i>↗</i></span><strong id="total">CHF 0.00</strong><small>Dépenses incluses, même sans catégorie</small></article><article class="stat"><span><span id="count-period-title">Opérations du mois</span> <i>⇄</i></span><strong id="count">0</strong><small>Dépenses prises en compte</small></article><article class="stat accent"><span>À catégoriser <i>✓</i></span><strong id="pending">0</strong><small>Catégorie à compléter, tous mois</small></article></div>

@@ -66,7 +66,7 @@ Le dossier **MyCompta · Documents** contient les PDF et le tableur **MyCompta �
 
 ## Limites et conservation
 
-L’extraction peut être corrigée depuis les opérations. Les PDF scannés sont archivés mais nécessitent une saisie manuelle : pas d’OCR. Les relevés protégés ou illisibles sont refusés. Pas de récupération automatique auprès des banques, de conversion de devises, ni de gestion des comptes depuis l’interface dans cette version. Les catégories proposées restent celles de la liste actuelle ; la vue Fournisseurs permet de modifier les associations, pas de créer de nouvelles catégories.
+L’extraction peut être corrigée depuis les opérations. Les PDF scannés sont archivés mais nécessitent une saisie manuelle : pas d’OCR. Les relevés protégés ou illisibles sont refusés. Pas de récupération automatique auprès des banques, de conversion de devises, ni de gestion des comptes depuis l’interface dans cette version. Les nouvelles catégories se créent dans Paramètres et sont enregistrées dans Google Sheets. Elles sont disponibles immédiatement pour les opérations, les règles fournisseurs et les budgets.
 
 Par défaut, le serveur écoute uniquement sur la boucle locale et fonctionne sur un ordinateur de confiance. Une écoute réseau nécessite le mode partagé, les sessions et une URL HTTPS derrière un proxy inverse (voir le guide HAOS). Les écritures sont séquencées sur une seule instance : ne pas lancer deux serveurs sur le même tableur ni modifier ses lignes en parallèle d’une écriture de l’application. Document et candidats sont enregistrés dans une seule requête Sheets atomique. Drive et Sheets ne forment pas une transaction unique : en cas d’échec partiel, le PDF peut déjà être dans Drive. Une nouvelle importation du même fichier le réutilise.
 

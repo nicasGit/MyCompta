@@ -4,7 +4,7 @@ const money = (amount, currency = 'CHF') => new Intl.NumberFormat('fr-CH', { sty
 const today = () => new Date().toLocaleDateString('sv-SE');
 const state = { status: {}, data: { documents: [], operations: [], budgets: [], categories: [] }, view: 'dashboard', demo: false, editing: null, busy: false };
 const titles = { dashboard: ['Vue d’ensemble', 'Vos dépenses, avec un peu de recul.'], documents: ['Documents', 'Tous vos relevés, au même endroit.'], operations: ['Opérations', 'Le détail de votre quotidien.'], review: ['À catégoriser', 'Classez vos opérations à votre rythme, sans bloquer les totaux.'], budgets: ['Budgets', 'Donnez un cap aux dépenses de votre foyer.'], settings: ['Mon espace Google', 'Vos données et vos documents, chez vous.'] };
-const categories = ['À catégoriser', 'Logement', 'Alimentation', 'Transports', 'Santé', 'Assurances', 'Loisirs', 'Abonnements', 'Impôts', 'Autres'];
+let categories = ['À catégoriser', 'Logement', 'Alimentation', 'Transports', 'Santé', 'Assurances', 'Loisirs', 'Abonnements', 'Impôts', 'Autres'];
 const labels = { pending: 'Incluse', validated: 'Incluse', ignored: 'Ignorée' };
 const typeLabels = { expense: 'Dépense', income: 'Revenu / remboursement', transfer: 'Virement', card_payment: 'Règlement de carte' };
 titles.suppliers = ['Fournisseurs et catégories', 'Le bon classement, automatiquement.'];
@@ -147,6 +147,13 @@ function summary() {
   return { expense, totals, groups };
 }
 function render() {
+  if (state.data.categories?.length) categories = state.data.categories;
+  for (const id of ['operation-category', 'budget-category', 'supplier-category']) {
+    const select = $('#' + id), previous = select.value;
+    select.innerHTML = options(id === 'operation-category' ? categories : categories.filter(c => c !== 'À catégoriser'));
+    if (categories.includes(previous)) select.value = previous;
+  }
+  $('#category-list').innerHTML = categories.map(name => `<span class="chip">${esc(name)}</span>`).join('');
   const annual = $('#period-mode').value === 'year';
   renderPeriodStatus();
   $('#expense-period-title').textContent = annual ? 'Dépenses de l’année' : 'Dépenses du mois';
@@ -207,6 +214,16 @@ function requireStorage() {
   if (!state.status.connected || !state.status.ready) { showView('settings'); message('Connectez Google et créez votre espace pour enregistrer des données.'); return false; }
   return true;
 }
+$('#category-form').onsubmit = event => {
+  event.preventDefault();
+  if (!requireStorage()) return;
+  const name = event.target.elements.name.value.trim();
+  action(async () => {
+    await api('/api/categories', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ name }) });
+    await load();
+    $('#category-form').reset();
+  }, 'Catégorie ajoutée. Elle est disponible dans les opérations, les fournisseurs et les budgets.');
+};
 $('#setup').onclick = () => action(async () => { state.status = await api('/api/setup', { method: 'POST' }); await load(); }, 'Votre espace Google est prêt. Vous pouvez importer un PDF.');
 $('#disconnect').onclick = () => action(async () => { await api('/api/disconnect', { method: 'POST' }); state.demo = false; await load(); }, 'Google déconnecté. Vos documents et votre tableur sont conservés.');
 $('#upload-form').onsubmit = event => {
