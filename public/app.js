@@ -173,6 +173,7 @@ function render() {
       : `Connecté au foyer en tant que ${s.role === 'owner' ? 'propriétaire' : 'membre'}. Le stockage est commun à tous les membres.`;
     $('#connection-state').insertAdjacentHTML('beforeend', `<p class="muted">${esc(text)}</p>${s.role === 'owner' ? '<p><a class="secondary" href="/auth/google?drive=1">Reconnecter le stockage Google</a></p>' : ''}`);
   }
+  if (s.configured) $('#connection-state').insertAdjacentHTML('beforeend', `<details class="alternate-account"><summary>Utiliser un autre compte Google</summary><p>Le compte souhaité n’apparaît pas sur Android ? Saisissez son adresse pour le retrouver chez Google.</p><form action="/auth/google" method="get" class="upload-form"><label>Adresse du compte Google<input name="email" type="email" inputmode="email" autocomplete="email" maxlength="254" placeholder="autre@gmail.com" required></label><button type="submit" class="secondary">Continuer avec cette adresse</button></form><p class="footnote">Google vérifie votre identité. En mode partagé, cette adresse doit être autorisée dans Mon foyer. Changer de session ne transfère pas la propriété du stockage Google.</p></details>`);
   $('#google-links').innerHTML = [s.sheetUrl ? `<a class="secondary" href="${esc(s.sheetUrl)}" target="_blank" rel="noopener noreferrer">Ouvrir Google Sheets ↗</a>` : '', s.driveUrl ? `<a class="secondary" href="${esc(s.driveUrl)}" target="_blank" rel="noopener noreferrer">Ouvrir Google Drive ↗</a>` : ''].join('');
   showView(state.view);
 }

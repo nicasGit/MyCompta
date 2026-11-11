@@ -61,13 +61,18 @@ function createApp(store = new GoogleStore(), config = runtimeConfig()) {
   app.get('/api/status', async (req, res) => res.json(await statusFor(req)));
   app.get('/auth/google', async (req, res) => {
     if (!store.configured) return res.redirect('/?error=configuration');
+    const email = typeof req.query.email === 'string' ? req.query.email.trim().toLowerCase() : '';
+    if ((req.query.email !== undefined && typeof req.query.email !== 'string')
+      || (email && (email.length > 254 || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)))) {
+      return res.status(400).send('Adresse Google invalide. Revenez dans MyCompta et saisissez une adresse e-mail complète.');
+    }
     for (const [key, entry] of states) if (entry.expires < Date.now()) states.delete(key);
     const drive = !household || !(await store.status()).connected || req.query.drive === '1';
     if (household && req.query.drive === '1' && req.user?.role !== 'owner') return res.status(403).send('Seul le propriétaire peut reconnecter le stockage Google.');
     const state = crypto.randomBytes(32).toString('hex');
     states.set(state, { expires: Date.now() + 600000, drive });
     res.cookie('oauth_state', state, { ...cookieOptions, maxAge: 600000, path: '/auth' });
-    res.redirect(store.authorizationUrl(state, drive));
+    res.redirect(store.authorizationUrl(state, drive, email));
   });
   app.get('/auth/callback', async (req, res) => {
     const cookie = req.headers.cookie?.split(';').map(v => v.trim()).find(v => v.startsWith('oauth_state='))?.slice(12);

@@ -26,6 +26,8 @@ MyCompta est une application web installable (PWA), comme ComptaInf. Ouvrir son 
 
 Le serveur HAOS doit rester accessible depuis le téléphone. L'installation ne remplace pas la connexion Google : chaque membre conserve son compte et ses droits. Internet est nécessaire pour consulter ou modifier le foyer ; hors connexion, une page invite à réessayer. Le service worker ne conserve aucune donnée financière ni PDF en cache. Les nouvelles versions sont récupérées en rouvrant l'application avec une connexion active. Voir les [conditions d'installation des PWA](https://developer.mozilla.org/en-US/docs/Web/Progressive_web_apps/Guides/Making_PWAs_installable).
 
+Si Android propose seulement le compte principal, ouvrir **Mon espace Google → Utiliser un autre compte Google**, puis saisir l'adresse souhaitée. MyCompta transmet cette indication à Google sans changer les droits du foyer ni la propriété du stockage. Le compte doit être autorisé dans le foyer et, si nécessaire, dans les utilisateurs de test du projet Google. La connexion habituelle demande le sélecteur de comptes ; la connexion avec une adresse utilise le paramètre officiel [login_hint](https://developers.google.com/identity/openid-connect/openid-connect).
+
 ## Configurer Google
 
 1. Créer un projet dans [Google Cloud Console](https://console.cloud.google.com/).

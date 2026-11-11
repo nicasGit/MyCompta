@@ -48,10 +48,12 @@ class GoogleStore {
       sheetUrl: resources.spreadsheetId ? `https://docs.google.com/spreadsheets/d/${resources.spreadsheetId}/edit` : null,
       driveUrl: resources.folderId ? `https://drive.google.com/drive/folders/${resources.folderId}` : null };
   }
-  authorizationUrl(state, drive = true) {
+  authorizationUrl(state, drive = true, email = '') {
     return 'https://accounts.google.com/o/oauth2/v2/auth?' + new URLSearchParams({
       client_id: this.clientId, redirect_uri: this.redirect, response_type: 'code',
-      scope: 'openid email profile' + (drive ? ' https://www.googleapis.com/auth/drive.file' : ''), access_type: 'offline', prompt: 'consent select_account', state,
+      scope: 'openid email profile' + (drive ? ' https://www.googleapis.com/auth/drive.file' : ''), access_type: 'offline',
+      prompt: email ? 'consent' : drive ? 'select_account consent' : 'select_account', state,
+      ...(email ? { login_hint: email } : {}),
     });
   }
   async tokenRequest(fields) {
