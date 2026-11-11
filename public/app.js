@@ -9,8 +9,16 @@ const labels = { pending: 'Incluse', validated: 'Incluse', ignored: 'Ignorée' }
 const typeLabels = { expense: 'Dépense', income: 'Revenu / remboursement', transfer: 'Virement', card_payment: 'Règlement de carte' };
 titles.suppliers = ['Fournisseurs et catégories', 'Le bon classement, automatiquement.'];
 titles.household = ['Mon foyer', 'Un espace commun, une connexion pour chacun.'];
+titles.preferences = ['Paramètres', 'Une interface à votre goût.'];
 state.editingSupplier = null;
-$('#month').value = today().slice(0, 7);
+$('#month').value = MyComptaPeriod.previousMonth();
+$('#period-mode option[value="year"]').textContent = `Année en cours (${new Date().getFullYear()})`;
+const selectedPeriod = () => MyComptaPeriod.prefix($('#period-mode').value, $('#month').value);
+function renderPeriodStatus() {
+  const value = state.view === 'budgets' ? $('#month').value : selectedPeriod();
+  const name = value.length === 4 ? `Année ${value}` : new Intl.DateTimeFormat('fr-CH', { month: 'long', year: 'numeric' }).format(new Date(Number(value.slice(0, 4)), Number(value.slice(5)) - 1, 1));
+  $('#period-status').textContent = `${name} · ${state.data.operations.length} opération(s) chargée(s) au total${state.demo ? ' · Exemple' : ''}`;
+}
 $('#redirect-uri').textContent = `${location.origin}/auth/callback`;
 const options = values => values.map(v => `<option>${esc(v)}</option>`).join('');
 $('#operation-category').innerHTML = options(categories);
@@ -49,8 +57,12 @@ function showView(view) {
   $('#title').textContent = $('#breadcrumb').textContent = titles[view][0];
   $('#subtitle').textContent = titles[view][1];
   $('#month-label').hidden = !['dashboard', 'operations', 'budgets'].includes(view);
-  $('#import-shortcut').hidden = view === 'settings' || view === 'documents';
-  $('#onboarding').hidden = state.status.connected || state.demo || view === 'settings';
+  $('#period-mode').hidden = view === 'budgets';
+  $('#month').hidden = view !== 'budgets' && $('#period-mode').value === 'year';
+  $('#period-status').hidden = !['dashboard', 'operations', 'budgets'].includes(view);
+  renderPeriodStatus();
+  $('#import-shortcut').hidden = ['settings', 'documents', 'preferences', 'household'].includes(view);
+  $('#onboarding').hidden = state.status.connected || state.demo || ['settings', 'preferences', 'household'].includes(view);
 }
 document.addEventListener('click', event => {
   const nav = event.target.closest('[data-view]');
@@ -87,7 +99,8 @@ document.addEventListener('click', event => {
   });
 });
 $('#import-shortcut').onclick = () => { showView('documents'); $('#upload-form select').focus(); };
-$('#month').onchange = () => { if (state.demo) render(); else action(load); };
+$('#month').onchange = () => { if ($('#month').value) render(); };
+$('#period-mode').onchange = () => render();
 $('#search').oninput = renderOperations;
 $('#refresh').onclick = () => action(load, 'Données actualisées.');
 $('#close-dialog').onclick = () => $('#operation-dialog').close();
@@ -116,15 +129,15 @@ function operationTable(operations) {
   return `<table><thead><tr><th>Date</th><th>Libellé / compte</th><th>Titulaire</th><th>Catégorie</th><th>État</th><th>Ajouté par</th><th class="amount">Montant</th><th></th></tr></thead><tbody>${operations.map(o => `<tr><td>${esc(o.date.split('-').reverse().join('.'))}</td><td class="label-cell" title="${esc(o.label)}">${esc(o.label)}<span class="subtext">${esc(o.account)} · ${esc(typeLabels[o.type] || o.type)}</span></td><td>${esc(o.holder || "Non renseigné")}<span class="subtext">${esc(o.cardLast4 ? "Carte " + o.cardLast4 : "")}</span></td><td>${esc(o.category)}</td><td><span class="badge ${esc(o.status)}">${esc(o.status !== "ignored" && o.category === "À catégoriser" ? "À catégoriser" : labels[o.status] || o.status)}</span></td><td>${esc(o.createdBy || "—")}</td><td class="amount">${esc(money(o.amount, o.currency))}</td><td><button class="text-button" data-edit="${esc(o.id)}">Modifier →</button></td></tr>`).join('')}</tbody></table>`;
 }
 function renderOperations() {
-  const month = $('#month').value;
+  const month = selectedPeriod();
   const search = $('#search').value.toLocaleLowerCase('fr');
-  const filtered = state.data.operations.filter(o => o.date.startsWith(month)).sort((a, b) => b.date.localeCompare(a.date));
+  const filtered = state.data.operations.filter(o => MyComptaPeriod.matches(o.date, month)).sort((a, b) => b.date.localeCompare(a.date));
   $('#operations-list').innerHTML = operationTable(filtered.filter(o => `${o.label} ${o.account} ${o.holder || ""} ${o.cardLast4 || ""}`.toLocaleLowerCase('fr').includes(search)));
   $('#recent-operations').innerHTML = operationTable(filtered.slice(0, 5));
   $('#review-list').innerHTML = operationTable(state.data.operations.filter(o => o.status !== 'ignored' && o.category === 'À catégoriser'));
 }
 function summary() {
-  const expense = state.data.operations.filter(o => o.date.startsWith($('#month').value) && o.status !== 'ignored' && o.type === 'expense');
+  const expense = state.data.operations.filter(o => MyComptaPeriod.matches(o.date, selectedPeriod()) && o.status !== 'ignored' && o.type === 'expense');
   const totals = {}, groups = {};
   expense.forEach(o => {
     totals[o.currency] = (totals[o.currency] || 0) + Math.round(o.amount * 100);
@@ -134,6 +147,11 @@ function summary() {
   return { expense, totals, groups };
 }
 function render() {
+  const annual = $('#period-mode').value === 'year';
+  renderPeriodStatus();
+  $('#expense-period-title').textContent = annual ? 'Dépenses de l’année' : 'Dépenses du mois';
+  $('#count-period-title').textContent = annual ? 'Opérations de l’année' : 'Opérations du mois';
+  $('#operations-period-title').textContent = annual ? 'Toutes les opérations de l’année' : 'Toutes les opérations du mois';
   renderSuppliers();
   const { expense, totals, groups } = summary();
   const pending = state.data.operations.filter(o => o.status !== 'ignored' && o.category === 'À catégoriser').length;
@@ -151,7 +169,7 @@ function render() {
   renderOperations();
   const budgets = state.data.budgets.filter(b => b.month === $('#month').value);
   $('#budget-list').innerHTML = budgets.map(b => {
-    const spent = expense.filter(o => o.category === b.category && o.currency === 'CHF').reduce((sum, o) => sum + Math.round(o.amount * 100), 0) / 100;
+    const spent = state.data.operations.filter(o => MyComptaPeriod.matches(o.date, b.month) && o.status !== 'ignored' && o.type === 'expense' && o.category === b.category && o.currency === 'CHF').reduce((sum, o) => sum + Math.round(o.amount * 100), 0) / 100;
     return `<div class="budget-row"><div><strong>${esc(b.category)}</strong><span>${esc(money(spent))} / ${esc(money(b.amount))}</span></div><progress value="${Math.min(spent, b.amount)}" max="${Math.max(b.amount, 1)}" aria-label="Budget ${esc(b.category)}"></progress><small>${spent > b.amount ? 'Dépassement de ' + esc(money(spent - b.amount)) : 'Reste disponible : ' + esc(money(b.amount - spent))}</small></div>`;
   }).join('') || empty('À chaque catégorie, son budget', 'Ajoutez une enveloppe mensuelle pour commencer.');
   const s = state.status;
@@ -173,14 +191,13 @@ function render() {
       : `Connecté au foyer en tant que ${s.role === 'owner' ? 'propriétaire' : 'membre'}. Le stockage est commun à tous les membres.`;
     $('#connection-state').insertAdjacentHTML('beforeend', `<p class="muted">${esc(text)}</p>${s.role === 'owner' ? '<p><a class="secondary" href="/auth/google?drive=1">Reconnecter le stockage Google</a></p>' : ''}`);
   }
-  if (s.configured) $('#connection-state').insertAdjacentHTML('beforeend', `<details class="alternate-account"><summary>Utiliser un autre compte Google</summary><p>Le compte souhaité n’apparaît pas sur Android ? Saisissez son adresse pour le retrouver chez Google.</p><form action="/auth/google" method="get" class="upload-form"><label>Adresse du compte Google<input name="email" type="email" inputmode="email" autocomplete="email" maxlength="254" placeholder="autre@gmail.com" required></label><button type="submit" class="secondary">Continuer avec cette adresse</button></form><p class="footnote">Google vérifie votre identité. En mode partagé, cette adresse doit être autorisée dans Mon foyer. Changer de session ne transfère pas la propriété du stockage Google.</p></details>`);
   $('#google-links').innerHTML = [s.sheetUrl ? `<a class="secondary" href="${esc(s.sheetUrl)}" target="_blank" rel="noopener noreferrer">Ouvrir Google Sheets ↗</a>` : '', s.driveUrl ? `<a class="secondary" href="${esc(s.driveUrl)}" target="_blank" rel="noopener noreferrer">Ouvrir Google Drive ↗</a>` : ''].join('');
   showView(state.view);
 }
 async function load() {
   if (state.demo) { render(); return; }
   state.status = await api('/api/status');
-  if (state.status.connected && state.status.ready && (!state.status.multiUser || state.status.driveConnected)) state.data = await api('/api/data?month=' + $('#month').value);
+  if (state.status.connected && state.status.ready && (!state.status.multiUser || state.status.driveConnected)) state.data = await api('/api/data');
   else state.data = { documents: [], operations: [], budgets: [], categories: [] };
   render();
   if (state.view === 'household') await loadHousehold();
@@ -338,4 +355,11 @@ $('#categorize-existing').onclick = () => {
 };
 const errorCode = new URLSearchParams(location.search).get('error');
 if (errorCode) { message(errorCode === 'configuration' ? 'Renseignez la configuration Google avant de vous connecter.' : errorCode === 'nonmembre' ? 'Ce compte ne fait pas partie du foyer. Le propriétaire doit ajouter votre adresse Google dans Mon foyer.' : errorCode === 'compte' ? 'Cet espace appartient à un autre compte Google. Reconnectez le compte utilisé pour créer votre espace MyCompta.' : 'La connexion Google n’a pas abouti. Vérifiez les autorisations, le client OAuth et l’URI de redirection, puis réessayez.', true); history.replaceState(null, '', '/'); showView('settings'); }
+// Installed mobile apps may stay open for days; reload Sheets on return.
+document.addEventListener('visibilitychange', () => {
+  if (document.visibilityState === 'visible' && !state.demo && !state.busy) action(load);
+});
+window.addEventListener('pageshow', event => {
+  if (event.persisted && !state.demo && !state.busy) action(load);
+});
 action(load);

@@ -101,11 +101,6 @@ test('shared HTTP application isolates users, protects owner actions and preserv
     return { response, session: session?.split(';')[0] };
   };
   assert.equal((await request('/api/data')).status, 401);
-  assert.equal((await request('/auth/google?email=invalide')).status, 400);
-  assert.equal((await request('/auth/google?email=a@example.test&email=b@example.test')).status, 400);
-  const alternate = await request('/auth/google?email=Autre%40example.test');
-  assert.equal(new URL(alternate.headers.get('location')).searchParams.get('login_hint'), 'autre@example.test');
-  assert.ok(alternate.headers.getSetCookie().some(value => value.startsWith('oauth_state=')));
   assert.equal((await request('/API/data')).status, 404);
   assert.equal((await request('/API/operations', null, 'POST', { label: 'unauthorized' })).status, 404);
   const anonymous = await (await request('/api/status')).json();

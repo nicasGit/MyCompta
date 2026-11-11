@@ -99,10 +99,6 @@ test('Drive and Sheets use the narrow file scope, atomic imports and literal cel
   const memberAuth = new URL(store.authorizationUrl('member-state', false));
   assert.equal(memberAuth.searchParams.get('prompt'), 'select_account');
   assert.equal(memberAuth.searchParams.get('scope'), 'openid email profile');
-  const otherAccount = new URL(store.authorizationUrl('other-state', false, 'autre@example.test'));
-  assert.equal(otherAccount.searchParams.get('login_hint'), 'autre@example.test');
-  assert.equal(otherAccount.searchParams.get('state'), 'other-state');
-  assert.equal(otherAccount.searchParams.get('scope'), 'openid email profile');
   await store.appendImport({ id: 'doc', name: '=HYPERLINK("evil")' }, [operation({ label: '=IMPORTXML("evil")' })]);
   assert.equal(batch.requests.length, 2);
   assert.deepEqual(batch.requests[0].appendCells.rows[0].values[1], { userEnteredValue: { stringValue: '=HYPERLINK("evil")' } });

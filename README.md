@@ -22,11 +22,14 @@ Ouvrir http://localhost:3001. Sans identifiants Google, le mode « Explorer un e
 
 ## Installer sur téléphone
 
+L'onglet **Paramètres** propose deux apparences : **Au fil des couleurs** (violet, bleu, vert et touches chaudes, par défaut) et **Bleu classique** (l'interface d'origine). Le choix s'applique immédiatement et est mémorisé dans le navigateur de chaque appareil, indépendamment des autres membres du foyer. Un choix déjà enregistré est conservé.
+
+La vue d'ensemble s'ouvre sur le mois précédent, adapté aux relevés importés en fin de mois. Le sélecteur de période permet aussi de consulter l'année civile en cours dans la vue d'ensemble et les opérations. Les budgets restent mensuels. Le nombre d'opérations chargées est affiché sous la période ; les données sont actualisées au retour dans l'application mobile.
+
 MyCompta est une application web installable (PWA), comme ComptaInf. Ouvrir son adresse HTTPS sur le téléphone, puis utiliser **Installer MyCompta** dans l'en-tête. Sur Android, Chrome propose l'installation depuis son menu ; sur iPhone ou iPad, utiliser Safari → Partager → Sur l'écran d'accueil. L'icône bleue ouvre ensuite MyCompta dans une fenêtre dédiée. Le bouton disparaît dans cette fenêtre.
 
 Le serveur HAOS doit rester accessible depuis le téléphone. L'installation ne remplace pas la connexion Google : chaque membre conserve son compte et ses droits. Internet est nécessaire pour consulter ou modifier le foyer ; hors connexion, une page invite à réessayer. Le service worker ne conserve aucune donnée financière ni PDF en cache. Les nouvelles versions sont récupérées en rouvrant l'application avec une connexion active. Voir les [conditions d'installation des PWA](https://developer.mozilla.org/en-US/docs/Web/Progressive_web_apps/Guides/Making_PWAs_installable).
 
-Si Android propose seulement le compte principal, ouvrir **Mon espace Google → Utiliser un autre compte Google**, puis saisir l'adresse souhaitée. MyCompta transmet cette indication à Google sans changer les droits du foyer ni la propriété du stockage. Le compte doit être autorisé dans le foyer et, si nécessaire, dans les utilisateurs de test du projet Google. La connexion habituelle demande le sélecteur de comptes ; la connexion avec une adresse utilise le paramètre officiel [login_hint](https://developers.google.com/identity/openid-connect/openid-connect).
 
 ## Configurer Google
 

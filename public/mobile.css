@@ -1,5 +1,10 @@
 .brand-row { display:flex; flex-direction:column; gap:18px; align-items:flex-start; }
 .install-button { font-size:11px; }
+.month-label { flex-wrap:wrap; }
+.month-label select { font-size:13px; min-height:44px; max-width:100%; }
+.workspace { width:100%; background:transparent; border-left:0; border-right:0; text-align:left; color:inherit; }
+.household-link { border:0; background:transparent; padding:10px 0; color:var(--blue); font:inherit; min-height:44px; }
+.household-link:hover { text-decoration:underline; }
 #install-dialog { max-width:490px; width:calc(100% - 32px); }
 #install-dialog p { overflow-wrap:anywhere; }
 @media(max-width:720px) {
@@ -10,6 +15,9 @@
   main { min-width:0; }
   .content { padding-bottom:max(24px, env(safe-area-inset-bottom)); }
   .panel,.dashboard-grid,.stats,.settings-panel { min-width:0; }
+  .month-label { width:100%; }
+  .month-label input { font-size:16px; flex:1; min-width:140px; }
+  .month-label select { font-size:16px; flex:1; min-width:140px; }
   .nav { min-height:44px; }
   input,select,textarea { font-size:16px; max-width:100%; min-height:44px; }
   .form-grid { grid-template-columns:1fr; }
