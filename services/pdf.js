@@ -27,12 +27,13 @@ async function extractPdf(buffer, source = 'Autre') {
         textPages)
       : null;
     const operations = cembra ? cembra.operations : parsePages(textPages);
+    const statementMonth = require('./document-name').invoiceDate(textPages)?.slice(0, 7) || '';
     const suggestedName = cembra ? require('./document-name').cembraDocumentName(textPages) : null;
     if (operations.length > 2000) throw Object.assign(new Error('Ce document contient trop de lignes. Importez un relevé plus court.'), { status: 400 });
-    if (cembra) return { operations, suggestedName, note: (suggestedName ? '' : 'Date de facture absente ou ambiguë : nom actuel conservé. ') + (operations.length
+    if (cembra) return { operations, suggestedName, statementMonth, note: (suggestedName ? '' : 'Date de facture absente ou ambiguë : nom actuel conservé. ') + (operations.length
       ? `Cembra : détail des transactions uniquement, sur toutes les pages. Date de transaction retenue ; date de comptabilisation et colonnes crédit/débit conservées dans la ligne d’origine. ${cembra.rejected} ligne(s) ambiguë(s) non importée(s). Opérations prises en compte immédiatement ; catégorisation facultative.`
       : `Aucun détail Cembra exploitable trouvé. Seul le tableau Date de trans. / Date de com. / Description / Crédit CHF / Débit CHF est accepté. ${cembra.rejected} ligne(s) ambiguë(s) non importée(s). Le PDF est archivé, sans reprise des soldes ou récapitulatifs. Les scans nécessitent un OCR.`) };
-    return { operations, note: operations.length
+    return { operations, statementMonth, note: operations.length
       ? 'Extraction automatique. Les opérations sont prises en compte immédiatement et restent modifiables. Les formats bancaires génériques ne sont pas encore certifiés.'
       : 'Aucune ligne reconnue. Le PDF est archivé ; saisissez les opérations manuellement. Les scans nécessitent un OCR, non inclus dans cette V1.' };
   } catch (error) {

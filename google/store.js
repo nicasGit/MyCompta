@@ -7,7 +7,7 @@ const { DEFAULT_SUPPLIERS, normalizeSupplier, validateSupplier, categorizeOperat
 const { runtimeConfig } = require('../services/config');
 
 const TABLES = {
-  Documents: ['id', 'name', 'source', 'driveId', 'hash', 'importedAt', 'status', 'note', 'createdBy'],
+  Documents: ['id', 'name', 'source', 'driveId', 'hash', 'importedAt', 'status', 'note', 'createdBy', 'contentHash', 'statementMonth'],
   Operations: ['id', 'documentId', 'date', 'label', 'amount', 'currency', 'account', 'category', 'type', 'status', 'page', 'raw', 'holder', 'cardLast4', 'cardType', 'createdBy'],
   Comptes: ['id', 'name', 'source', 'currency'],
   Categories: ['name', 'rule'],
@@ -185,7 +185,7 @@ class GoogleStore {
     for (const name of Object.keys(TABLES)) params.append('ranges', `${name}!A:P`);
     const result = await this.request(base + '/values:batchGet?' + params);
     // Add missing trailing metadata columns without overwriting customized cells.
-    for (const [name, index, lengths] of [['Documents', 0, [8]], ['Operations', 1, [15, 12]]]) {
+    for (const [name, index, lengths] of [['Documents', 0, [10, 9, 8]], ['Operations', 1, [15, 12]]]) {
       const rows = result.valueRanges[index]?.values || [];
       const header = rows[0];
       if (!header) continue;
@@ -242,6 +242,24 @@ class GoogleStore {
     })().finally(() => { this.suppliersSetup = null; });
     return this.suppliersSetup;
   }
+  async assignCategory(id, category) {
+    const data = await this.read();
+    const operation = data.operations.find(item => item.id === id);
+    if (!operation) throw fail('Opération introuvable.', 404);
+    if (operation.status === 'ignored' || !['expense', 'income'].includes(operation.type)) throw fail('Cette opération ne peut pas être classée automatiquement.', 400);
+    const name = operation.label.trim().replace(/\s+/g, ' ').slice(0, 120);
+    const rule = validateSupplier({ name, category }, categoryNames(data.categories));
+    const existing = data.suppliers.find(item => normalizeSupplier(item.name) === normalizeSupplier(rule.name));
+    const supplier = { ...rule, id: existing?.id || crypto.randomUUID() };
+    const row = existing?._row || Math.max(1, ...data.suppliers.map(item => item._row)) + 1;
+    const { base } = await this.context();
+    // One Sheets request applies the category and remembers the rule together.
+    await this.json(base + '/values:batchUpdate', 'POST', { valueInputOption: 'RAW', data: [
+      { range: `Operations!H${operation._row}`, values: [[category]] },
+      { range: `Fournisseurs!A${row}:C${row}`, values: [rowFor('Fournisseurs', supplier)] }
+    ] });
+    return { category, supplier: supplier.name };
+  }
   async saveSupplier(supplier, update = false) {
     const data = await this.read();
     const value = { ...validateSupplier(supplier, categoryNames(data.categories)), id: supplier.id };
@@ -293,6 +311,15 @@ class GoogleStore {
   }
   async renamePdf(id, name) {
     return this.json(`https://www.googleapis.com/drive/v3/files/${encodeURIComponent(id)}?fields=id,name`, 'PATCH', { name });
+  }
+  async setDocumentMonth(id, month) {
+    if (!/^\d{4}-(0[1-9]|1[0-2])$/.test(month || '')) throw fail('Mois du relevé invalide.', 400);
+    const data = await this.read();
+    const document = data.documents.find(item => item.id === id);
+    if (!document) throw fail('Document introuvable.', 404);
+    const { base } = await this.context();
+    await this.json(base + `/values/Documents!K${document._row}?valueInputOption=RAW`, 'PUT', { values: [[month]] });
+    return { month };
   }
   async renameDocument(id, name) {
     const data = await this.read();

@@ -242,6 +242,12 @@ test('HTTP flow: upload, deduplication, corrections, budgets and cross-origin pr
   response = await fetch(base + '/api/documents?name=test.pdf&source=UBS', { method: 'POST', headers: { 'X-MyCompta': '1', 'Content-Type': 'application/pdf' }, body: pdf('02.11.2026 Migros 42.30 CHF') });
   assert.equal((await response.json()).duplicate, true);
   assert.equal(uploads, 1);
+  // A different PDF binary with the same transactions must not upload again.
+  response = await fetch(base + '/api/documents?name=another-export.pdf&source=UBS', { method: 'POST', headers: { 'X-MyCompta': '1', 'Content-Type': 'application/pdf' }, body: Buffer.concat([pdf('02.11.2026 Migros 42.30 CHF'), Buffer.from('\n% different export')]) });
+  assert.equal(response.status, 200);
+  assert.equal((await response.json()).duplicateReason, 'content');
+  assert.equal(uploads, 1);
+  assert.equal(data.operations.length, 1);
   const op = data.operations[0];
   response = await fetch(base + '/api/operations/' + op.id, { method: 'PUT', headers: { 'X-MyCompta': '1', 'Content-Type': 'application/json' }, body: JSON.stringify({ ...op, category: 'Alimentation', status: 'validated' }) });
   assert.equal(response.status, 200);

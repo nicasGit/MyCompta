@@ -1,0 +1,32 @@
+const test = require('node:test');
+const assert = require('node:assert/strict');
+const { GoogleStore } = require('../google/store');
+const { categorizeOperation } = require('../services/suppliers');
+
+test('quick category atomically writes a category and reusable supplier rule without modifying financial cells', async () => {
+  const store = new GoogleStore();
+  const data = { operations: [{ id: 'op', label: 'Animalerie Lausanne', type: 'expense', status: 'validated', _row: 8 }], suppliers: [], categories: [{ name: 'Animaux' }] };
+  store.read = async () => structuredClone(data);
+  store.context = async () => ({ base: 'https://sheets.example' });
+  const requests = [];
+  store.json = async (url, method, body) => { requests.push({ url, method, body }); };
+  const result = await store.assignCategory('op', 'Animaux');
+  assert.deepEqual(result, { category: 'Animaux', supplier: 'Animalerie Lausanne' });
+  assert.equal(requests.length, 1);
+  const { body } = requests[0];
+  assert.equal(body.valueInputOption, 'RAW');
+  assert.deepEqual(body.data[0], { range: 'Operations!H8', values: [['Animaux']] });
+  assert.equal(body.data[1].range, 'Fournisseurs!A2:C2');
+  const [id, name, category] = body.data[1].values[0];
+  assert.ok(id);
+  assert.equal(categorizeOperation({ label: 'ANIMALERIE LAUSANNE', category: 'À catégoriser', type: 'expense' }, [{ id, name, category }]).category, 'Animaux');
+  data.suppliers.push({ id, name, category, _row: 4 });
+  await store.assignCategory('op', 'Loisirs');
+  assert.equal(requests[1].body.data[1].range, 'Fournisseurs!A4:C4');
+  assert.equal(requests[1].body.data[1].values[0][0], id);
+  await assert.rejects(() => store.assignCategory('op', 'Inconnue'), /catégorie/);
+  await assert.rejects(() => store.assignCategory('absent', 'Animaux'), /introuvable/);
+  data.operations[0].status = 'ignored';
+  await assert.rejects(() => store.assignCategory('op', 'Animaux'), /classée/);
+  assert.equal(requests.length, 2);
+});

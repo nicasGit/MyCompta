@@ -12,6 +12,34 @@ titles.household = ['Mon foyer', 'Un espace commun, une connexion pour chacun.']
 titles.preferences = ['Paramètres', 'Une interface à votre goût.'];
 state.editingSupplier = null;
 $('#month').value = MyComptaPeriod.previousMonth();
+$('#coverage-end').value = MyComptaPeriod.previousMonth();
+$('#coverage-start').value = $('#coverage-end').value.slice(0, 4) + '-01';
+for (const id of ['coverage-source', 'coverage-start', 'coverage-end']) $('#' + id).onchange = renderCoverage;
+document.addEventListener('change', event => {
+  const input = event.target.closest('[data-document-month]');
+  if (!input || !input.value || !requireStorage()) return;
+  const id = input.dataset.documentMonth, month = input.value;
+  action(async () => {
+    await api('/api/documents/' + encodeURIComponent(id) + '/month', { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ month }) });
+    await load();
+  }, 'Mois du relevé enregistré. Le suivi mensuel est actualisé.');
+});
+function renderCoverage() {
+  if (!state.demo && (!state.status.connected || !state.status.ready)) {
+    $('#coverage-summary').textContent = 'Connectez votre espace Google pour vérifier les relevés disponibles.';
+    $('#coverage-grid').innerHTML = '';
+    $('#coverage-unknown').textContent = '';
+    return;
+  }
+  const source = $('#coverage-source').value, start = $('#coverage-start').value, end = $('#coverage-end').value;
+  const span = (Number(end.slice(0, 4)) - Number(start.slice(0, 4))) * 12 + Number(end.slice(5)) - Number(start.slice(5));
+  const valid = MyComptaDocumentMonths.valid(start) && MyComptaDocumentMonths.valid(end) && start <= end && span < 120;
+  const months = valid ? MyComptaDocumentMonths.coverage(state.data.documents, source, start, end) : [];
+  const unknown = state.data.documents.filter(document => document.source === source && !MyComptaDocumentMonths.month(document)).length;
+  $('#coverage-summary').textContent = valid ? `${months.filter(item => item.count > 0).length}/${months.length} mois présents · ${months.filter(item => !item.count).length} mois manquant(s) pour ${source}` : 'Choisissez une période valide de 10 ans maximum.';
+  $('#coverage-grid').innerHTML = months.map(item => `<div class="coverage-month ${item.count ? 'present' : 'missing'}"><strong>${esc(new Intl.DateTimeFormat('fr-CH', { month: 'long', year: 'numeric' }).format(new Date(Number(item.month.slice(0, 4)), Number(item.month.slice(5)) - 1, 1)))}</strong><span>${item.count ? `✓ ${item.count} PDF` : 'Manquant'}</span></div>`).join('');
+  $('#coverage-unknown').textContent = unknown ? `${unknown} PDF de ${source} sans mois identifié : renseignez leur mois ci-dessous avant de conclure qu’un relevé manque.` : 'Tous les documents de cet établissement ont un mois identifié.';
+}
 $('#period-mode option[value="year"]').textContent = `Année en cours (${new Date().getFullYear()})`;
 const selectedPeriod = () => MyComptaPeriod.prefix($('#period-mode').value, $('#month').value);
 function renderPeriodStatus() {
@@ -64,7 +92,45 @@ function showView(view) {
   $('#import-shortcut').hidden = ['settings', 'documents', 'preferences', 'household'].includes(view);
   $('#onboarding').hidden = state.status.connected || state.demo || ['settings', 'preferences', 'household'].includes(view);
 }
+function openCategoryMenu(id) {
+  if (state.busy || !requireStorage()) return;
+  const operation = state.data.operations.find(item => item.id === id);
+  if (!operation || !['expense', 'income'].includes(operation.type)) return;
+  const dialog = $('#category-menu');
+  dialog.dataset.operationId = id;
+  $('#category-menu-label').textContent = operation.label;
+  $('#category-menu-options').innerHTML = categories.filter(category => category !== 'À catégoriser').map(category => `<button type="button" class="secondary" data-assign-category="${esc(category)}">${esc(category)}</button>`).join('');
+  dialog.showModal();
+}
+$('#review-list').addEventListener('contextmenu', event => {
+  const row = event.target.closest('[data-operation-id]');
+  if (!row) return;
+  event.preventDefault();
+  openCategoryMenu(row.dataset.operationId);
+});
+$('#close-category-menu').onclick = () => $('#category-menu').close();
+
 document.addEventListener('click', event => {
+  const quickCategory = event.target.closest('[data-quick-category]');
+  if (quickCategory) openCategoryMenu(quickCategory.dataset.quickCategory);
+  const assign = event.target.closest('[data-assign-category]');
+  if (assign && !state.busy) {
+    const id = $('#category-menu').dataset.operationId, category = assign.dataset.assignCategory;
+    $('#category-menu').close();
+    action(async () => {
+      const result = await api('/api/operations/' + encodeURIComponent(id) + '/category', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ category }) });
+      await load();
+      message(`Catégorie ${category} attribuée. Correspondance mémorisée pour « ${result.supplier} ». Vous pouvez la modifier dans Fournisseurs.`);
+    });
+  }
+  const categoryRow = event.target.closest('[data-budget-category]');
+  if (categoryRow) {
+    state.categoryFilter = { category: categoryRow.dataset.budgetCategory, currency: categoryRow.dataset.currency };
+    $('#search').value = '';
+    showView('operations');
+    renderOperations();
+    $('#category-detail-label').focus();
+  }
   const nav = event.target.closest('[data-view]');
   if (nav) { showView(nav.dataset.view); if (nav.dataset.view === 'household') action(loadHousehold); }
   const edit = event.target.closest('[data-edit]');
@@ -102,6 +168,10 @@ $('#import-shortcut').onclick = () => { showView('documents'); $('#upload-form s
 $('#month').onchange = () => { if ($('#month').value) render(); };
 $('#period-mode').onchange = () => render();
 $('#search').oninput = renderOperations;
+$('#clear-category-filter').onclick = () => {
+  state.categoryFilter = null;
+  renderOperations();
+};
 $('#refresh').onclick = () => action(load, 'Données actualisées.');
 $('#close-dialog').onclick = () => $('#operation-dialog').close();
 $('#add-operation').onclick = () => editOperation();
@@ -121,32 +191,38 @@ function docRows(documents, compact = false) {
     const operations = state.data.operations.filter(o => o.documentId === d.id);
     const pending = operations.filter(o => o.status !== 'ignored' && o.category === 'À catégoriser').length;
     const status = operations.length ? (pending ? `${pending} à catégoriser` : 'Traité') : 'Saisie nécessaire';
-    return `<div class="document-row"><span class="pdf-icon">PDF</span><div class="document-info"><strong>${url ? `<a href="${esc(url)}" target="_blank" rel="noopener noreferrer">${esc(d.name)} ↗</a>` : esc(d.name)}</strong><small>${esc(d.source)} · ${esc(new Date(d.importedAt).toLocaleDateString('fr-CH'))} · ${operations.length} opération(s)${d.createdBy ? " · Ajouté par " + esc(d.createdBy) : ""}</small>${!compact && d.note ? `<p>${esc(d.note)}</p>` : ''}${reanalyse}</div><span class="badge ${pending ? '' : operations.length ? 'validated' : ''}">${esc(status)}</span></div>`;
+    return `<div class="document-row"><span class="pdf-icon">PDF</span><div class="document-info"><strong>${url ? `<a href="${esc(url)}" target="_blank" rel="noopener noreferrer">${esc(d.name)} ↗</a>` : esc(d.name)}</strong><small>${esc(d.source)} · ${esc(new Date(d.importedAt).toLocaleDateString('fr-CH'))} · ${operations.length} opération(s)${d.createdBy ? " · Ajouté par " + esc(d.createdBy) : ""}</small>${!compact && d.note ? `<p>${esc(d.note)}</p>` : ''}${reanalyse}${!compact ? `<label class="document-month-label">Mois du relevé<input type="month" data-document-month="${esc(d.id)}" value="${esc(MyComptaDocumentMonths.month(d))}" aria-label="Mois du relevé ${esc(d.name)}"></label>` : ''}</div><span class="badge ${pending ? '' : operations.length ? 'validated' : ''}">${esc(status)}</span></div>`;
   }).join('');
 }
-function operationTable(operations) {
+function operationTable(operations, quickCategory = false) {
   if (!operations.length) return empty('Aucune opération à afficher', 'Les lignes importées apparaîtront ici.');
-  return `<table><thead><tr><th>Date</th><th>Libellé / compte</th><th>Titulaire</th><th>Catégorie</th><th>État</th><th>Ajouté par</th><th class="amount">Montant</th><th></th></tr></thead><tbody>${operations.map(o => `<tr><td>${esc(o.date.split('-').reverse().join('.'))}</td><td class="label-cell" title="${esc(o.label)}">${esc(o.label)}<span class="subtext">${esc(o.account)} · ${esc(typeLabels[o.type] || o.type)}</span></td><td>${esc(o.holder || "Non renseigné")}<span class="subtext">${esc(o.cardLast4 ? "Carte " + o.cardLast4 : "")}</span></td><td>${esc(o.category)}</td><td><span class="badge ${esc(o.status)}">${esc(o.status !== "ignored" && o.category === "À catégoriser" ? "À catégoriser" : labels[o.status] || o.status)}</span></td><td>${esc(o.createdBy || "—")}</td><td class="amount">${esc(money(o.amount, o.currency))}</td><td><button class="text-button" data-edit="${esc(o.id)}">Modifier →</button></td></tr>`).join('')}</tbody></table>`;
+  return `<table><thead><tr><th>Date</th><th>Libellé / compte</th><th>Titulaire</th><th>Catégorie</th><th>État</th><th>Ajouté par</th><th class="amount">Montant</th><th></th></tr></thead><tbody>${operations.map(o => `<tr data-operation-id="${esc(o.id)}"><td>${esc(o.date.split('-').reverse().join('.'))}</td><td class="label-cell" title="${esc(o.label)}">${esc(o.label)}<span class="subtext">${esc(o.account)} · ${esc(typeLabels[o.type] || o.type)}</span></td><td>${esc(o.holder || "Non renseigné")}<span class="subtext">${esc(o.cardLast4 ? "Carte " + o.cardLast4 : "")}</span></td><td>${esc(o.category)}</td><td><span class="badge ${esc(o.status)}">${esc(o.status !== "ignored" && o.category === "À catégoriser" ? "À catégoriser" : labels[o.status] || o.status)}</span></td><td>${esc(o.createdBy || "—")}</td><td class="amount">${esc(money(o.amount, o.currency))}</td><td>${quickCategory && ['expense', 'income'].includes(o.type) ? `<button type="button" class="secondary" data-quick-category="${esc(o.id)}">Catégoriser</button>` : ''}<button class="text-button" data-edit="${esc(o.id)}">Modifier →</button></td></tr>`).join('')}</tbody></table>`;
 }
 function renderOperations() {
   const month = selectedPeriod();
   const search = $('#search').value.toLocaleLowerCase('fr');
   const filtered = state.data.operations.filter(o => MyComptaPeriod.matches(o.date, month)).sort((a, b) => b.date.localeCompare(a.date));
-  $('#operations-list').innerHTML = operationTable(filtered.filter(o => `${o.label} ${o.account} ${o.holder || ""} ${o.cardLast4 || ""}`.toLocaleLowerCase('fr').includes(search)));
+  const selection = state.categoryFilter;
+  const details = selection ? filtered.filter(o => o.category === selection.category && o.currency === selection.currency && o.type === 'expense' && o.status !== 'ignored') : filtered;
+  $('#category-detail').hidden = !selection;
+  if (selection) $('#category-detail-label').textContent = `${selection.category} · ${details.length} dépense(s) · ${money(details.reduce((sum, o) => sum + Math.round(o.amount * 100), 0) / 100, selection.currency)}`;
+  $('#operations-list').innerHTML = operationTable(details.filter(o => `${o.label} ${o.account} ${o.holder || ""} ${o.cardLast4 || ""}`.toLocaleLowerCase('fr').includes(search)));
   $('#recent-operations').innerHTML = operationTable(filtered.slice(0, 5));
-  $('#review-list').innerHTML = operationTable(state.data.operations.filter(o => o.status !== 'ignored' && o.category === 'À catégoriser'));
+  $('#review-list').innerHTML = operationTable(state.data.operations.filter(o => o.status !== 'ignored' && o.category === 'À catégoriser'), true);
 }
 function summary() {
   const expense = state.data.operations.filter(o => MyComptaPeriod.matches(o.date, selectedPeriod()) && o.status !== 'ignored' && o.type === 'expense');
   const totals = {}, groups = {};
   expense.forEach(o => {
     totals[o.currency] = (totals[o.currency] || 0) + Math.round(o.amount * 100);
-    const key = `${o.category}|${o.currency}`;
+    const key = JSON.stringify([o.category, o.currency]);
     groups[key] = (groups[key] || 0) + Math.round(o.amount * 100);
   });
   return { expense, totals, groups };
 }
 function render() {
+  MyComptaAnnual.render(state.data.operations);
+  renderCoverage();
   if (state.data.categories?.length) categories = state.data.categories;
   for (const id of ['operation-category', 'budget-category', 'supplier-category']) {
     const select = $('#' + id), previous = select.value;
@@ -167,8 +243,8 @@ function render() {
   $('#pending').textContent = $('#nav-count').textContent = pending;
   $('#demo-banner').hidden = !state.demo;
   $('#category-chart').innerHTML = Object.entries(groups).sort((a, b) => b[1] - a[1]).map(([key, cents]) => {
-    const [category, currency] = key.split('|');
-    return `<div class="category-row"><div><span>${esc(category)}</span><strong>${esc(money(cents / 100, currency))}</strong></div><progress value="${cents}" max="${totals[currency]}" aria-label="${esc(category)}"></progress></div>`;
+    const [category, currency] = JSON.parse(key);
+    return `<button type="button" class="category-row category-drilldown" data-budget-category="${esc(category)}" data-currency="${esc(currency)}" aria-label="Voir les dépenses ${esc(category)} en ${esc(currency)}"><div><span>${esc(category)} →</span><strong>${esc(money(cents / 100, currency))}</strong></div><progress value="${cents}" max="${totals[currency]}" aria-label="${esc(category)}"></progress></button>`;
   }).join('') || empty('Un premier relevé, une première vue', 'Importez des opérations pour voir leur répartition.');
   $('#recent-documents').innerHTML = docRows(state.data.documents.slice(-3), true);
   $('#documents-list').innerHTML = docRows(state.data.documents);
@@ -229,15 +305,19 @@ $('#disconnect').onclick = () => action(async () => { await api('/api/disconnect
 $('#upload-form').onsubmit = event => {
   event.preventDefault();
   if (!requireStorage()) return;
-  const file = event.target.pdf.files[0];
-  if (!file || file.size > 15 * 1024 * 1024) return message('Sélectionnez un PDF de 15 Mo maximum.', true);
+  const form = event.target, files = Array.from(form.pdf.files), source = form.source.value;
+  if (!files.length) return message('Choisissez au moins un PDF.', true);
   action(async () => {
-    message('Import en cours : lecture du PDF et enregistrement dans Google…');
-    const params = new URLSearchParams({ name: file.name, source: event.target.source.value });
-    const result = await api('/api/documents?' + params, { method: 'POST', headers: { 'Content-Type': 'application/pdf' }, body: file });
-    event.target.reset();
-    await load();
-    message(result.duplicate ? 'Ce PDF a déjà été importé. Aucun doublon créé.' : `PDF archivé dans Drive. ${result.count} opération(s) importées et prises en compte. ${result.note}`);
+    const results = await MyComptaImports.run(files, source,
+      (file, source) => api('/api/documents?' + new URLSearchParams({ name: file.name, source }), { method: 'POST', headers: { 'Content-Type': 'application/pdf' }, body: file }),
+      ({ index, file, results }) => {
+        message('Import ' + (index + 1) + '/' + files.length + ' : ' + file.name);
+        $('#import-results').innerHTML = results.map(item => '<p class="banner' + (item.error ? ' import-error' : '') + '"><strong>' + esc(item.name) + '</strong><br>' + esc(item.error || (item.response.duplicate ? 'Relevé déjà importé (fichier ou données identiques) : aucun ajout.' : item.response.count + ' opération(s) importée(s). ' + (item.response.note || ''))) + '</p>').join('');
+      });
+    const failed = results.filter(item => item.error).length;
+    if (!failed) form.reset();
+    try { await load(); } catch (error) { message('Imports terminés. Actualisation impossible : ' + error.message, true); return; }
+    message((files.length - failed) + '/' + files.length + ' fichier(s) traité(s). Consultez les résultats ci-dessous.', failed > 0);
   });
 };
 function editOperation(operation) {
@@ -258,8 +338,6 @@ function updateOperationHints() {
   const form = $('#operation-form');
   const document = state.data.documents.find(d => d.id === form.documentId.value);
   $('#open-pdf').hidden = !pdfUrl(document);
-  const duplicate = state.data.operations.some(o => o.id !== state.editing?.id && o.status !== 'ignored' && o.date === form.date.value && o.amount === Number(form.amount.value) && o.currency === form.currency.value && o.label.toLowerCase() === form.label.value.trim().toLowerCase());
-  $('#duplicate-warning').hidden = !duplicate;
 }
 $('#operation-form').oninput = updateOperationHints;
 $('#open-pdf').onclick = () => {

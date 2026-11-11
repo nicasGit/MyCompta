@@ -6,6 +6,7 @@ const { extractPdf, suggestPdfName } = require('./services/pdf');
 const { validateOperation, summarize } = require('./services/operations');
 const { validateSupplier, categorizeOperation } = require('./services/suppliers');
 const { categoryNames } = require('./services/categories');
+const { contentHash, matchingDocument } = require('./services/document-duplicates');
 const { exec } = require("child_process");
 const { runtimeConfig } = require('./services/config');
 const { Household } = require('./services/household');
@@ -131,11 +132,14 @@ function createApp(store = new GoogleStore(), config = runtimeConfig()) {
       const existing = data.documents.find(d => d.hash === hash);
       if (existing) return { duplicate: true, document: existing };
       const parsed = await extractPdf(req.body, source);
+      const fingerprint = contentHash(source, parsed.operations);
+      const sameData = matchingDocument(data, source, fingerprint);
+      if (sameData) return { duplicate: true, duplicateReason: 'content', document: sameData };
       const storedName = parsed.suggestedName || name;
       const file = await store.uploadPdf(req.body, storedName, hash);
       if (parsed.suggestedName) await store.renamePdf(file.id, storedName);
       const document = {
-        id: crypto.randomUUID(), name: storedName, source, driveId: file.id, hash, createdBy: req.user?.email || '',
+        id: crypto.randomUUID(), name: storedName, source, driveId: file.id, hash, contentHash: fingerprint, statementMonth: parsed.statementMonth || '', createdBy: req.user?.email || '',
         importedAt: new Date().toISOString(), status: parsed.operations.length ? 'Importé' : 'Saisie nécessaire', note: parsed.note
       };
       const operations = parsed.operations.map(o => categorizeOperation({
@@ -207,6 +211,12 @@ function createApp(store = new GoogleStore(), config = runtimeConfig()) {
     res.json(await serialize(() => store.saveSupplier(supplier, true)));
   });
   app.delete('/api/suppliers/:id', async (req, res) => res.json(await serialize(() => store.deleteSupplier(req.params.id))));
+  app.post('/api/operations/:id/category', async (req, res) => {
+    res.json(await serialize(() => store.assignCategory(req.params.id, req.body.category)));
+  });
+  app.put('/api/documents/:id/month', async (req, res) => {
+    res.json(await serialize(() => store.setDocumentMonth(req.params.id, req.body.month)));
+  });
   app.post('/api/categories', async (req, res) => {
     res.status(201).json(await serialize(() => store.addCategory(req.body.name)));
   });

@@ -1,5 +1,28 @@
 .brand-row { display:flex; flex-direction:column; gap:18px; align-items:flex-start; }
 .install-button { font-size:11px; }
+.annual-categories { display:flex; flex-wrap:wrap; gap:10px 18px; margin:12px 0 20px; }
+.annual-categories label { display:flex; align-items:center; gap:7px; font-size:12px; min-height:44px; cursor:pointer; }
+.annual-categories input { width:18px; height:18px; min-height:18px; accent-color:var(--blue); }
+.annual-chart { width:100%; overflow-x:auto; }
+.annual-chart>svg { display:block; width:100%; min-width:650px; }
+#annual-table { margin-top:18px; }
+#annual-table caption { text-align:left; margin-bottom:14px; color:var(--muted); }
+.coverage-grid { display:grid; grid-template-columns:repeat(auto-fit,minmax(140px,1fr)); gap:10px; margin:16px 0; }
+.coverage-month { display:flex; flex-direction:column; gap:8px; padding:15px; border:1px solid var(--border); border-radius:9px; font-size:12px; }
+.coverage-month.present { background:#e8f5ee; color:#25634c; border-color:#c2e3d3; }
+.coverage-month.missing { background:#fff3e5; color:#865321; border-color:#eed4b4; }
+.document-month-label { display:flex; flex-wrap:wrap; align-items:center; gap:10px; margin-top:12px; font-size:12px; }
+.document-month-label input { width:170px; min-height:44px; }
+#category-menu { width:calc(100% - 32px); max-width:480px; max-height:85dvh; overflow:auto; }
+#category-menu-label { overflow-wrap:anywhere; }
+.category-menu-options { display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); gap:10px; }
+.category-menu-options button { min-height:44px; white-space:normal; overflow-wrap:anywhere; }
+#review-list [data-quick-category] { margin-right:12px; }
+.category-drilldown { display:block; width:100%; border:0; background:transparent; color:inherit; text-align:left; padding:10px 8px; border-radius:8px; margin:8px 0; min-height:56px; }
+.category-drilldown:hover { background:var(--light); }
+.category-drilldown progress { display:block; }
+#category-detail { display:flex; align-items:center; justify-content:space-between; flex-wrap:wrap; gap:12px; }
+.import-error { border-color:#e7b8b2; color:#8c362f; background:#fff0ee; }
 .month-label { flex-wrap:wrap; }
 .month-label select { font-size:13px; min-height:44px; max-width:100%; }
 .workspace { width:100%; background:transparent; border-left:0; border-right:0; text-align:left; color:inherit; }
