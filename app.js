@@ -218,10 +218,11 @@ function createApp(store = new GoogleStore(), config = runtimeConfig()) {
     res.json(await serialize(() => store.setDocumentMonth(req.params.id, req.body.month)));
   });
   app.post('/api/categories', async (req, res) => {
-    res.status(201).json(await serialize(() => store.addCategory(req.body.name)));
+    res.status(201).json(await serialize(() => store.addCategory(req.body.name, req.body.parent)));
   });
-  app.post('/api/categorize/preview', async (req, res) => res.json({ matches: await store.previewCategorization() }));
-  app.post('/api/categorize/confirm', async (req, res) => res.json(await serialize(() => store.confirmCategorization(req.body.items))));
+  app.put('/api/categories', async (req, res) => res.json(await serialize(() => store.renameCategory(req.body.previous, req.body.name))));
+  app.post('/api/categorize/preview', async (req, res) => res.json({ matches: await store.previewCategorization(req.body?.reclassify === true) }));
+  app.post('/api/categorize/confirm', async (req, res) => res.json(await serialize(() => store.confirmCategorization(req.body.items, req.body.reclassify === true))));
   app.post('/api/categorize', async (req, res) => res.json(await serialize(() => store.categorizeOperations())));
   app.use(express.static(path.join(__dirname, 'public'), { setHeaders(res, file) {
     if (/\.(?:html|js|css|webmanifest)$/.test(file)) res.setHeader('Cache-Control', 'no-cache');

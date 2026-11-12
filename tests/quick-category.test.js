@@ -3,6 +3,33 @@ const assert = require('node:assert/strict');
 const { GoogleStore } = require('../google/store');
 const { categorizeOperation } = require('../services/suppliers');
 
+test('reclassification previews old versus new categories and validates fresh selections before writing', async () => {
+  const store = new GoogleStore();
+  const base = { id: 'one', label: 'Station toto', category: 'Transports', type: 'expense', status: 'validated', _row: 2 };
+  const data = { suppliers: [{ name: 'Station', category: 'Transports › Essence' }], operations: [
+    base, { ...base, id: 'ignored', status: 'ignored', _row: 3 },
+    { ...base, id: 'transfer', type: 'transfer', _row: 4 },
+    { ...base, id: 'unmatched', label: 'Autre magasin', _row: 5 }
+  ] };
+  store.read = async () => structuredClone(data);
+  store.context = async () => ({ base: 'https://sheets.example' });
+  const writes = [];
+  store.json = async (url, method, body) => writes.push(body);
+  assert.deepEqual(await store.previewCategorization(), []);
+  const preview = await store.previewCategorization(true);
+  assert.equal(preview.length, 1);
+  assert.equal(preview[0].previousCategory, 'Transports');
+  assert.equal(preview[0].category, 'Transports › Essence');
+  assert.equal(writes.length, 0);
+  const items = preview.map(({ id, category, previousCategory }) => ({ id, category, previousCategory }));
+  await assert.rejects(() => store.confirmCategorization([{ id: 'one', category: 'Transports › Essence' }], true), /actuelle/);
+  assert.deepEqual(await store.confirmCategorization(items, true), { updated: 1 });
+  assert.deepEqual(writes[0].data, [{ range: 'Operations!H2', values: [['Transports › Essence']] }]);
+  data.operations[0].category = 'Loisirs';
+  await assert.rejects(() => store.confirmCategorization(items, true), /changé/);
+  assert.equal(writes.length, 1);
+});
+
 test('short filters match future descriptions and rescan changes only validated selections that remain uncategorized', async () => {
   const store = new GoogleStore();
   const base = { date: '2026-10-01', amount: 10, currency: 'CHF', type: 'expense', status: 'validated', category: 'À catégoriser' };

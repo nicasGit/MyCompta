@@ -49,6 +49,43 @@ function renderPeriodStatus() {
 }
 $('#redirect-uri').textContent = `${location.origin}/auth/callback`;
 const options = values => values.map(v => `<option>${esc(v)}</option>`).join('');
+const categoryBelongsTo = (value, category) => value === category || value.startsWith(category + ' › ');
+function openCategoryManagement(category) {
+  if (!requireStorage() || category === 'À catégoriser') return;
+  $('#category-management').dataset.category = category;
+  $('#category-management-current').textContent = category;
+  $('#category-management-name').value = '';
+  $('#category-management-error').textContent = '';
+  $('#add-subcategory').disabled = category.includes(' › ');
+  $('#category-management').showModal();
+}
+$('#category-list').addEventListener('contextmenu', event => {
+  const button = event.target.closest('[data-manage-category]');
+  if (!button) return;
+  event.preventDefault();
+  openCategoryManagement(button.dataset.manageCategory);
+});
+$('#category-list').addEventListener('click', event => {
+  const button = event.target.closest('[data-manage-category]');
+  if (button) openCategoryManagement(button.dataset.manageCategory);
+});
+$('#close-category-management').onclick = () => $('#category-management').close();
+async function saveCategoryManagement(subcategory) {
+  const input = $('#category-management-name');
+  if (!input.reportValidity()) return;
+  const previous = $('#category-management').dataset.category, name = input.value.trim();
+  const body = subcategory ? { name, parent: previous } : { previous, name };
+  action(async () => {
+    try { await api('/api/categories', { method: subcategory ? 'POST' : 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) }); }
+    catch (error) { $('#category-management-error').textContent = error.message; return; }
+    $('#category-management').close();
+    state.categoryFilter = null;
+    await load();
+    message(subcategory ? 'Sous-catégorie ajoutée et disponible immédiatement.' : 'Catégorie renommée, correspondances et opérations mises à jour.');
+  });
+}
+$('#add-subcategory').onclick = () => saveCategoryManagement(true);
+$('#rename-category').onclick = () => saveCategoryManagement(false);
 $('#operation-category').innerHTML = options(categories);
 $('#budget-category').innerHTML = options(categories.filter(c => c !== 'À catégoriser'));
 $('#supplier-category').innerHTML = options(categories.filter(c => c !== 'À catégoriser'));
@@ -86,6 +123,7 @@ function showView(view) {
   $('#subtitle').textContent = titles[view][1];
   $('#month-label').hidden = !['dashboard', 'operations', 'budgets'].includes(view);
   $('#holder-label').hidden = !['operations', 'review'].includes(view);
+  $('#operation-category-label').hidden = view !== 'operations';
   $('#period-mode').hidden = view === 'budgets';
   $('#month').hidden = view !== 'budgets' && $('#period-mode').value === 'year';
   $('#period-status').hidden = !['dashboard', 'operations', 'budgets'].includes(view);
@@ -113,25 +151,31 @@ $('#review-list').addEventListener('contextmenu', event => {
 });
 $('#close-category-menu').onclick = () => $('#category-menu').close();
 $('#close-categorization-preview').onclick = () => $('#categorization-preview').close();
-async function openCategorizationPreview(onlyWithMatches = false) {
-    const result = await api('/api/categorize/preview', { method: 'POST' });
+async function openCategorizationPreview(onlyWithMatches = false, reclassify = false) {
+    const result = await api('/api/categorize/preview', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ reclassify }) });
+    state.rescanReclassify = reclassify;
+    $('#rescan-title').textContent = reclassify ? 'Reclasser les opérations' : 'Valider les correspondances';
+    $('#rescan-description').textContent = reclassify ? 'Recherche sur tous les mois, titulaires et établissements, y compris les opérations déjà catégorisées. Décochez les classements manuels à conserver. Seuls les changements proposés par une règle fournisseur sont affichés.' : 'Recherche sur tous les mois et toutes les règles fournisseurs. Seules les opérations À catégoriser sont proposées. Décochez les lignes à conserver sans catégorie.';
     state.rescanMatches = result.matches;
     if (onlyWithMatches && !result.matches.length) return;
     $('#rescan-count').textContent = `${result.matches.length} correspondance(s) trouvée(s). Aucune modification appliquée à ce stade.`;
-    $('#rescan-results').innerHTML = result.matches.length ? `<table><thead><tr><th>Appliquer</th><th>Date</th><th>Libellé</th><th>Montant</th><th>Filtre</th><th>Catégorie proposée</th></tr></thead><tbody>${result.matches.map((item, index) => `<tr><td><input type="checkbox" data-rescan-index="${index}" checked aria-label="Appliquer à ${esc(item.label)}"></td><td>${esc(item.date)}</td><td>${esc(item.label)}</td><td>${esc(money(item.amount, item.currency))}</td><td>${esc(item.supplier)}</td><td>${esc(item.category)}</td></tr>`).join('')}</tbody></table>` : '<p>Aucune opération à classer avec les règles actuelles.</p>';
+    $('#rescan-results').innerHTML = result.matches.length ? `<table><thead><tr><th>Appliquer</th><th>Date</th><th>Libellé</th><th>Montant</th><th>Filtre</th><th>Catégorie actuelle</th><th>Catégorie proposée</th></tr></thead><tbody>${result.matches.map((item, index) => `<tr><td><input type="checkbox" data-rescan-index="${index}" checked aria-label="Appliquer à ${esc(item.label)}"></td><td>${esc(item.date)}</td><td>${esc(item.label)}</td><td>${esc(money(item.amount, item.currency))}</td><td>${esc(item.supplier)}</td><td>${esc(item.previousCategory || 'À catégoriser')}</td><td>${esc(item.category)}</td></tr>`).join('')}</tbody></table>` : '<p>Aucune opération à classer avec les règles actuelles.</p>';
     $('#confirm-categorization').disabled = !result.matches.length;
     $('#categorization-preview').showModal();
 }
 $('#preview-categorization').onclick = () => {
   if (requireStorage()) action(() => openCategorizationPreview());
 };
+$('#reclassify-operations').onclick = () => {
+  if (requireStorage()) action(() => openCategorizationPreview(false, true));
+};
 $('#confirm-categorization').onclick = () => {
-  const items = [...document.querySelectorAll('[data-rescan-index]:checked')].map(input => state.rescanMatches[Number(input.dataset.rescanIndex)]).map(({ id, category }) => ({ id, category }));
+  const items = [...document.querySelectorAll('[data-rescan-index]:checked')].map(input => state.rescanMatches[Number(input.dataset.rescanIndex)]).map(({ id, category, previousCategory }) => ({ id, category, previousCategory }));
   if (!items.length) { $('#rescan-count').textContent = 'Sélectionnez au moins une ligne.'; return; }
   if (items.length > 2000) { $('#rescan-count').textContent = 'Sélectionnez au maximum 2000 lignes par validation.'; return; }
   action(async () => {
     let result;
-    try { result = await api('/api/categorize/confirm', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ items }) }); }
+    try { result = await api('/api/categorize/confirm', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ items, reclassify: state.rescanReclassify }) }); }
     catch (error) { $('#rescan-count').textContent = error.message; return; }
     $('#categorization-preview').close();
     $('#rescan-offer').hidden = true;
@@ -160,7 +204,7 @@ document.addEventListener('click', event => {
   const categoryRow = event.target.closest('[data-budget-category]');
   if (categoryRow) {
     $('#holder-filter').value = '';
-    state.categoryFilter = { category: categoryRow.dataset.budgetCategory, currency: categoryRow.dataset.currency };
+    state.categoryFilter = { category: categoryRow.dataset.budgetCategory, currency: categoryRow.dataset.currency, expensesOnly: true };
     $('#search').value = '';
     showView('operations');
     renderOperations();
@@ -210,6 +254,11 @@ $('#month').onchange = () => { if ($('#month').value) render(); };
 $('#period-mode').onchange = () => render();
 $('#search').oninput = renderOperations;
 $('#holder-filter').onchange = renderOperations;
+$('#operation-category-filter').onchange = () => {
+  const category = $('#operation-category-filter').value;
+  state.categoryFilter = category ? { category } : null;
+  renderOperations();
+};
 const holderKey = value => String(value || '').normalize('NFKC').trim().replace(/\s+/g, ' ').toLocaleUpperCase('fr');
 const matchesHolder = operation => !$('#holder-filter').value || ($('#holder-filter').value === 'unknown' ? !holderKey(operation.holder) : 'holder:' + holderKey(operation.holder) === $('#holder-filter').value);
 $('#clear-category-filter').onclick = () => {
@@ -248,9 +297,10 @@ function renderOperations() {
   const allForPeriod = state.data.operations.filter(o => MyComptaPeriod.matches(o.date, month)).sort((a, b) => b.date.localeCompare(a.date));
   const filtered = allForPeriod.filter(matchesHolder);
   const selection = state.categoryFilter;
-  const details = selection ? filtered.filter(o => o.category === selection.category && o.currency === selection.currency && o.type === 'expense' && o.status !== 'ignored') : filtered;
+  $('#operation-category-filter').value = selection?.category || '';
+  const details = selection ? filtered.filter(o => categoryBelongsTo(o.category, selection.category) && (!selection.currency || o.currency === selection.currency) && (!selection.expensesOnly || (o.type === 'expense' && o.status !== 'ignored'))) : filtered;
   $('#category-detail').hidden = !selection;
-  if (selection) $('#category-detail-label').textContent = `${selection.category} · ${details.length} dépense(s) · ${money(details.reduce((sum, o) => sum + Math.round(o.amount * 100), 0) / 100, selection.currency)}`;
+  if (selection) $('#category-detail-label').textContent = `${selection.category} · ${details.length} opération(s)${selection.expensesOnly ? ' · Dépenses incluses uniquement' : ''}`;
   const visible = details.filter(o => `${o.label} ${o.account} ${o.holder || ""} ${o.cardLast4 || ""}`.toLocaleLowerCase('fr').includes(search));
   $('#operations-list').innerHTML = operationTable(visible);
   const totals = MyComptaOperationTotals.calculate(visible);
@@ -263,7 +313,7 @@ function summary() {
   const totals = {}, groups = {};
   expense.forEach(o => {
     totals[o.currency] = (totals[o.currency] || 0) + Math.round(o.amount * 100);
-    const key = JSON.stringify([o.category, o.currency]);
+    const key = JSON.stringify([o.category.split(' › ')[0], o.currency]);
     groups[key] = (groups[key] || 0) + Math.round(o.amount * 100);
   });
   return { expense, totals, groups };
@@ -276,12 +326,16 @@ function render() {
   MyComptaAnnual.render(state.data.operations);
   renderCoverage();
   if (state.data.categories?.length) categories = state.data.categories;
+  $('#operation-category-filter').innerHTML = '<option value="">Toutes les catégories</option>' + options(categories);
   for (const id of ['operation-category', 'budget-category', 'supplier-category']) {
     const select = $('#' + id), previous = select.value;
     select.innerHTML = options(id === 'operation-category' ? categories : categories.filter(c => c !== 'À catégoriser'));
     if (categories.includes(previous)) select.value = previous;
   }
-  $('#category-list').innerHTML = categories.map(name => `<span class="chip">${esc(name)}</span>`).join('');
+  $('#category-list').innerHTML = categories.map(name => name === 'À catégoriser' ? `<span class="chip">${esc(name)}</span>` : `<button type="button" class="secondary" data-manage-category="${esc(name)}" title="Ajouter une sous-catégorie ou renommer">${esc(name)}</button>`).join('');
+  const previousParent = $('#new-category-parent').value;
+  $('#new-category-parent').innerHTML = '<option value="">Aucune — catégorie principale</option>' + options(categories.filter(name => name !== 'À catégoriser' && !name.includes(' › ')));
+  if (categories.includes(previousParent)) $('#new-category-parent').value = previousParent;
   const annual = $('#period-mode').value === 'year';
   renderPeriodStatus();
   $('#expense-period-title').textContent = annual ? 'Dépenses de l’année' : 'Dépenses du mois';
@@ -304,7 +358,7 @@ function render() {
   renderOperations();
   const budgets = state.data.budgets.filter(b => b.month === $('#month').value);
   $('#budget-list').innerHTML = budgets.map(b => {
-    const spent = state.data.operations.filter(o => MyComptaPeriod.matches(o.date, b.month) && o.status !== 'ignored' && o.type === 'expense' && o.category === b.category && o.currency === 'CHF').reduce((sum, o) => sum + Math.round(o.amount * 100), 0) / 100;
+    const spent = state.data.operations.filter(o => MyComptaPeriod.matches(o.date, b.month) && o.status !== 'ignored' && o.type === 'expense' && categoryBelongsTo(o.category, b.category) && o.currency === 'CHF').reduce((sum, o) => sum + Math.round(o.amount * 100), 0) / 100;
     return `<div class="budget-row"><div><strong>${esc(b.category)}</strong><span>${esc(money(spent))} / ${esc(money(b.amount))}</span></div><progress value="${Math.min(spent, b.amount)}" max="${Math.max(b.amount, 1)}" aria-label="Budget ${esc(b.category)}"></progress><small>${spent > b.amount ? 'Dépassement de ' + esc(money(spent - b.amount)) : 'Reste disponible : ' + esc(money(b.amount - spent))}</small></div>`;
   }).join('') || empty('À chaque catégorie, son budget', 'Ajoutez une enveloppe mensuelle pour commencer.');
   const s = state.status;
@@ -346,8 +400,9 @@ $('#category-form').onsubmit = event => {
   event.preventDefault();
   if (!requireStorage()) return;
   const name = event.target.elements.name.value.trim();
+  const parent = $('#new-category-parent').value;
   action(async () => {
-    await api('/api/categories', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ name }) });
+    await api('/api/categories', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ name, parent }) });
     await load();
     $('#category-form').reset();
   }, 'Catégorie ajoutée. Elle est disponible dans les opérations, les fournisseurs et les budgets.');

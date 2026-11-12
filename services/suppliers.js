@@ -21,8 +21,8 @@ function matchingSupplier(label, suppliers = []) {
   return [...suppliers].sort((a, b) => normalizeSupplier(b.name).length - normalizeSupplier(a.name).length)
     .find(s => text.includes(` ${normalizeSupplier(s.name)} `));
 }
-function categorizeOperation(operation, suppliers) {
-  if (operation.category !== 'À catégoriser' || operation.status === 'ignored' || !['expense', 'income'].includes(operation.type)) return operation;
+function categorizeOperation(operation, suppliers, reclassify = false) {
+  if ((!reclassify && operation.category !== 'À catégoriser') || operation.status === 'ignored' || !['expense', 'income'].includes(operation.type)) return operation;
   const rule = matchingSupplier(operation.label, suppliers);
   return rule ? { ...operation, category: rule.category } : operation;
 }

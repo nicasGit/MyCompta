@@ -10,7 +10,7 @@ const TABLES = {
   Documents: ['id', 'name', 'source', 'driveId', 'hash', 'importedAt', 'status', 'note', 'createdBy', 'contentHash', 'statementMonth'],
   Operations: ['id', 'documentId', 'date', 'label', 'amount', 'currency', 'account', 'category', 'type', 'status', 'page', 'raw', 'holder', 'cardLast4', 'cardType', 'createdBy'],
   Comptes: ['id', 'name', 'source', 'currency'],
-  Categories: ['name', 'rule'],
+  Categories: ['name', 'rule', 'parent'],
   Budgets: ['month', 'category', 'amount'],
   Fournisseurs: ['id', 'name', 'category'],
 };
@@ -185,7 +185,7 @@ class GoogleStore {
     for (const name of Object.keys(TABLES)) params.append('ranges', `${name}!A:P`);
     const result = await this.request(base + '/values:batchGet?' + params);
     // Add missing trailing metadata columns without overwriting customized cells.
-    for (const [name, index, lengths] of [['Documents', 0, [10, 9, 8]], ['Operations', 1, [15, 12]]]) {
+    for (const [name, index, lengths] of [['Documents', 0, [10, 9, 8]], ['Operations', 1, [15, 12]], ['Categories', 3, [2]]]) {
       const rows = result.valueRanges[index]?.values || [];
       const header = rows[0];
       if (!header) continue;
@@ -219,12 +219,32 @@ class GoogleStore {
     if (new Set(suppliers.map(s => s.id)).size !== suppliers.length || new Set(suppliers.map(s => normalizeSupplier(s.name))).size !== suppliers.length) throw fail('Des fournisseurs sont en double dans Sheets. Corrigez les doublons dans l’onglet Fournisseurs.', 409);
     return { documents: data.Documents, operations, accounts: data.Comptes, categories: data.Categories, budgets, suppliers };
   }
-  async addCategory(input) {
+  async addCategory(input, parent = '') {
     const name = validateCategory(input);
     const data = await this.read();
-    if (categoryNames(data.categories).some(existing => categoryKey(existing) === categoryKey(name))) throw fail('Cette catégorie existe déjà.', 409);
-    await this.writeRow('Categories', { name, rule: '' });
-    return { name };
+    const allowed = categoryNames(data.categories);
+    if (parent && (typeof parent !== 'string' || parent.includes(' › ') || !allowed.includes(parent) || parent === CATEGORIES[0])) throw fail('Catégorie parente invalide.', 400);
+    const fullName = parent ? `${parent} › ${name}` : name;
+    if (allowed.some(existing => categoryKey(existing) === categoryKey(fullName))) throw fail('Cette catégorie existe déjà.', 409);
+    await this.writeRow('Categories', { name, rule: '', parent });
+    return { name: fullName };
+  }
+  async renameCategory(oldName, input) {
+    const name = validateCategory(input), data = await this.read();
+    if (typeof oldName !== 'string' || oldName === CATEGORIES[0]) throw fail('Cette catégorie ne peut pas être renommée.', 400);
+    const old = data.categories.find(row => (row.parent ? `${row.parent} › ${row.name}` : row.name) === oldName);
+    if (!old) throw fail('Catégorie introuvable.', 404);
+    const fullName = old.parent ? `${old.parent} › ${name}` : name;
+    if (categoryNames(data.categories).some(existing => existing !== oldName && categoryKey(existing) === categoryKey(fullName))) throw fail('Cette catégorie existe déjà.', 409);
+    const replace = value => value === oldName ? fullName : !old.parent && value.startsWith(oldName + ' › ') ? fullName + value.slice(oldName.length) : value;
+    const changes = [{ range: `Categories!A${old._row}`, values: [[name]] }];
+    if (!old.parent) for (const child of data.categories.filter(row => row.parent === oldName)) changes.push({ range: `Categories!C${child._row}`, values: [[name]] });
+    for (const [table, values, column] of [['Operations', data.operations, 'H'], ['Fournisseurs', data.suppliers, 'C'], ['Budgets', data.budgets, 'B']]) {
+      for (const value of values) if (replace(value.category) !== value.category) changes.push({ range: `${table}!${column}${value._row}`, values: [[replace(value.category)]] });
+    }
+    const { base } = await this.context();
+    await this.json(base + '/values:batchUpdate', 'POST', { valueInputOption: 'RAW', data: changes });
+    return { name: fullName };
   }
   async ensureSuppliers() {
     if (this.suppliersReady) return;
@@ -261,23 +281,24 @@ class GoogleStore {
     ] });
     return { category, supplier: supplier.name };
   }
-  async previewCategorization() {
+  async previewCategorization(reclassify = false) {
     const data = await this.read();
     return data.operations.flatMap(operation => {
-      const next = categorizeOperation(operation, data.suppliers);
+      const next = categorizeOperation(operation, data.suppliers, reclassify);
       if (next.category === operation.category) return [];
       return [{ id: operation.id, date: operation.date, label: operation.label, amount: operation.amount,
-        currency: operation.currency, category: next.category, supplier: matchingSupplier(operation.label, data.suppliers).name }];
+        currency: operation.currency, category: next.category, previousCategory: operation.category, supplier: matchingSupplier(operation.label, data.suppliers).name }];
     });
   }
-  async confirmCategorization(items) {
+  async confirmCategorization(items, reclassify = false) {
     if (!Array.isArray(items) || !items.length || items.length > 2000 || items.some(item => typeof item?.id !== 'string' || typeof item.category !== 'string')
       || new Set(items.map(item => item.id)).size !== items.length) throw fail('Sélection invalide (1 à 2000 opérations).', 400);
+    if (reclassify && items.some(item => typeof item.previousCategory !== 'string')) throw fail('La catégorie actuelle est requise pour reclasser une opération.', 400);
     const data = await this.read();
     const changes = items.map(item => {
       const old = data.operations.find(operation => operation.id === item.id);
-      const next = old && categorizeOperation(old, data.suppliers);
-      if (!old || next.category === old.category || next.category !== item.category) throw fail('Les correspondances ont changé. Relancez la recherche avant de valider.', 409);
+      const next = old && categorizeOperation(old, data.suppliers, reclassify);
+      if (!old || (item.previousCategory !== undefined && old.category !== item.previousCategory) || next.category === old.category || next.category !== item.category) throw fail('Les correspondances ont changé. Relancez la recherche avant de valider.', 409);
       return { range: `Operations!H${old._row}`, values: [[next.category]] };
     });
     const { base } = await this.context();

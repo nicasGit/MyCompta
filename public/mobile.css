@@ -1,5 +1,8 @@
 .brand-row { display:flex; flex-direction:column; gap:18px; align-items:flex-start; }
 .install-button { font-size:11px; }
+#category-management { width:calc(100% - 32px); max-width:560px; max-height:85dvh; overflow:auto; }
+#category-list { align-items:stretch; }
+#category-list button { min-height:44px; white-space:normal; }
 #operations-totals { padding:18px; margin:16px 0; border:1px solid var(--border); border-radius:10px; background:var(--light); }
 .operation-total-values { display:flex; flex-wrap:wrap; gap:16px 30px; margin:12px 0; }
 .operation-total-values>div { display:flex; flex-direction:column; gap:8px; }

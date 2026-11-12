@@ -29,7 +29,7 @@ function summarize(operations, month) {
   for (const o of expenses) {
     const cents = Math.round(Number(o.amount) * 100);
     totals[o.currency] = (totals[o.currency] || 0) + cents;
-    const key = `${o.category}|${o.currency}`;
+    const key = `${o.category.split(' › ')[0]}|${o.currency}`;
     categories[key] = (categories[key] || 0) + cents;
   }
   return { month: selectedMonth, count: expenses.length, uncategorized: operations.filter(o => o.status !== 'ignored' && o.category === 'À catégoriser').length,
