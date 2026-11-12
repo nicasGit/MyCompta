@@ -112,16 +112,17 @@ $('#review-list').addEventListener('contextmenu', event => {
 });
 $('#close-category-menu').onclick = () => $('#category-menu').close();
 $('#close-categorization-preview').onclick = () => $('#categorization-preview').close();
-$('#preview-categorization').onclick = () => {
-  if (!requireStorage()) return;
-  action(async () => {
+async function openCategorizationPreview(onlyWithMatches = false) {
     const result = await api('/api/categorize/preview', { method: 'POST' });
     state.rescanMatches = result.matches;
+    if (onlyWithMatches && !result.matches.length) return;
     $('#rescan-count').textContent = `${result.matches.length} correspondance(s) trouvée(s). Aucune modification appliquée à ce stade.`;
     $('#rescan-results').innerHTML = result.matches.length ? `<table><thead><tr><th>Appliquer</th><th>Date</th><th>Libellé</th><th>Montant</th><th>Filtre</th><th>Catégorie proposée</th></tr></thead><tbody>${result.matches.map((item, index) => `<tr><td><input type="checkbox" data-rescan-index="${index}" checked aria-label="Appliquer à ${esc(item.label)}"></td><td>${esc(item.date)}</td><td>${esc(item.label)}</td><td>${esc(money(item.amount, item.currency))}</td><td>${esc(item.supplier)}</td><td>${esc(item.category)}</td></tr>`).join('')}</tbody></table>` : '<p>Aucune opération à classer avec les règles actuelles.</p>';
     $('#confirm-categorization').disabled = !result.matches.length;
     $('#categorization-preview').showModal();
-  });
+}
+$('#preview-categorization').onclick = () => {
+  if (requireStorage()) action(() => openCategorizationPreview());
 };
 $('#confirm-categorization').onclick = () => {
   const items = [...document.querySelectorAll('[data-rescan-index]:checked')].map(input => state.rescanMatches[Number(input.dataset.rescanIndex)]).map(({ id, category }) => ({ id, category }));
@@ -152,6 +153,7 @@ document.addEventListener('click', event => {
       await load();
       message(`Catégorie ${category} attribuée. Correspondance mémorisée pour « ${result.supplier} ». Vous pouvez la modifier dans Fournisseurs.`);
       $('#rescan-offer').hidden = false;
+      await openCategorizationPreview(true);
     });
   }
   const categoryRow = event.target.closest('[data-budget-category]');
@@ -163,6 +165,11 @@ document.addEventListener('click', event => {
     $('#category-detail-label').focus();
   }
   const nav = event.target.closest('[data-view]');
+  if (nav?.hasAttribute('data-dashboard-card')) {
+    state.categoryFilter = null;
+    $('#search').value = '';
+    renderOperations();
+  }
   if (nav) { showView(nav.dataset.view); if (nav.dataset.view === 'household') action(loadHousehold); }
   const edit = event.target.closest('[data-edit]');
   const removeMember = event.target.closest('[data-remove-member]');

@@ -1,5 +1,5 @@
 name: MyCompta
-version: "0.2.19"
+version: "0.2.21"
 slug: mycompta
 description: Dépenses et documents du foyer avec Google Sheets et Drive
 url: https://github.com/nicasGit/MyCompta

@@ -1,5 +1,9 @@
 .brand-row { display:flex; flex-direction:column; gap:18px; align-items:flex-start; }
 .install-button { font-size:11px; }
+.stat-link { display:block; width:100%; text-align:left; color:var(--ink); transition:transform .15s,box-shadow .15s; }
+.stat-link:hover { transform:translateY(-2px); box-shadow:0 6px 20px #20365315; }
+.stat-link:active { transform:translateY(0); }
+@media(prefers-reduced-motion:reduce) { .stat-link { transition:none; } .stat-link:hover { transform:none; } }
 .rule-filter-label { display:flex; flex-direction:column; gap:8px; margin:18px 0; }
 .rule-filter-label input { width:100%; min-height:48px; font-size:16px; }
 #categorization-preview { width:calc(100% - 32px); max-width:1050px; max-height:85dvh; overflow:auto; }
