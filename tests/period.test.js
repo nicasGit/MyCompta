@@ -2,6 +2,15 @@ const test = require('node:test');
 const assert = require('node:assert/strict');
 const period = require('../public/period');
 
+test('month navigation advances and retreats through year boundaries without skipping short months', () => {
+  assert.equal(period.shiftMonth('2026-12', 1), '2027-01');
+  assert.equal(period.shiftMonth('2026-01', -1), '2025-12');
+  assert.equal(period.shiftMonth('2026-03', -1), '2026-02');
+  assert.equal(period.shiftMonth('2026-02', 1), '2026-03');
+  assert.equal(period.shiftMonth('2026-13', 1), '');
+  assert.equal(period.shiftMonth('0001-01', -1), '');
+});
+
 test('previous month handles January and month ends using local calendar dates', () => {
   assert.equal(period.previousMonth(new Date(2026, 10, 11)), '2026-10');
   assert.equal(period.previousMonth(new Date(2026, 0, 31)), '2025-12');
