@@ -1,5 +1,16 @@
 .brand-row { display:flex; flex-direction:column; gap:18px; align-items:flex-start; }
 .install-button { font-size:11px; }
+#operations-totals { padding:18px; margin:16px 0; border:1px solid var(--border); border-radius:10px; background:var(--light); }
+.operation-total-values { display:flex; flex-wrap:wrap; gap:16px 30px; margin:12px 0; }
+.operation-total-values>div { display:flex; flex-direction:column; gap:8px; }
+#operations-totals small { display:block; color:var(--muted); line-height:1.6; }
+.holder-filter-label { display:flex; align-items:center; gap:8px; color:var(--muted); font-size:12px; max-width:100%; }
+.holder-filter-label select { max-width:100%; min-height:44px; }
+@media(max-width:720px) { .holder-filter-label { width:100%; flex-wrap:wrap; } .holder-filter-label select { width:100%; } }
+@media(min-width:721px) {
+  .sidebar { overflow-y:auto; overflow-x:hidden; overscroll-behavior-y:contain; scrollbar-width:thin; }
+  .sidebar>*,.sidebar nav { flex-shrink:0; }
+}
 .stat-link { display:block; width:100%; text-align:left; color:var(--ink); transition:transform .15s,box-shadow .15s; }
 .stat-link:hover { transform:translateY(-2px); box-shadow:0 6px 20px #20365315; }
 .stat-link:active { transform:translateY(0); }

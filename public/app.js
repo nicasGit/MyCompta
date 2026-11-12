@@ -85,6 +85,7 @@ function showView(view) {
   $('#title').textContent = $('#breadcrumb').textContent = titles[view][0];
   $('#subtitle').textContent = titles[view][1];
   $('#month-label').hidden = !['dashboard', 'operations', 'budgets'].includes(view);
+  $('#holder-label').hidden = !['operations', 'review'].includes(view);
   $('#period-mode').hidden = view === 'budgets';
   $('#month').hidden = view !== 'budgets' && $('#period-mode').value === 'year';
   $('#period-status').hidden = !['dashboard', 'operations', 'budgets'].includes(view);
@@ -158,6 +159,7 @@ document.addEventListener('click', event => {
   }
   const categoryRow = event.target.closest('[data-budget-category]');
   if (categoryRow) {
+    $('#holder-filter').value = '';
     state.categoryFilter = { category: categoryRow.dataset.budgetCategory, currency: categoryRow.dataset.currency };
     $('#search').value = '';
     showView('operations');
@@ -166,6 +168,7 @@ document.addEventListener('click', event => {
   }
   const nav = event.target.closest('[data-view]');
   if (nav?.hasAttribute('data-dashboard-card')) {
+    $('#holder-filter').value = '';
     state.categoryFilter = null;
     $('#search').value = '';
     renderOperations();
@@ -206,6 +209,9 @@ $('#import-shortcut').onclick = () => { showView('documents'); $('#upload-form s
 $('#month').onchange = () => { if ($('#month').value) render(); };
 $('#period-mode').onchange = () => render();
 $('#search').oninput = renderOperations;
+$('#holder-filter').onchange = renderOperations;
+const holderKey = value => String(value || '').normalize('NFKC').trim().replace(/\s+/g, ' ').toLocaleUpperCase('fr');
+const matchesHolder = operation => !$('#holder-filter').value || ($('#holder-filter').value === 'unknown' ? !holderKey(operation.holder) : 'holder:' + holderKey(operation.holder) === $('#holder-filter').value);
 $('#clear-category-filter').onclick = () => {
   state.categoryFilter = null;
   renderOperations();
@@ -239,14 +245,18 @@ function operationTable(operations, quickCategory = false) {
 function renderOperations() {
   const month = selectedPeriod();
   const search = $('#search').value.toLocaleLowerCase('fr');
-  const filtered = state.data.operations.filter(o => MyComptaPeriod.matches(o.date, month)).sort((a, b) => b.date.localeCompare(a.date));
+  const allForPeriod = state.data.operations.filter(o => MyComptaPeriod.matches(o.date, month)).sort((a, b) => b.date.localeCompare(a.date));
+  const filtered = allForPeriod.filter(matchesHolder);
   const selection = state.categoryFilter;
   const details = selection ? filtered.filter(o => o.category === selection.category && o.currency === selection.currency && o.type === 'expense' && o.status !== 'ignored') : filtered;
   $('#category-detail').hidden = !selection;
   if (selection) $('#category-detail-label').textContent = `${selection.category} · ${details.length} dépense(s) · ${money(details.reduce((sum, o) => sum + Math.round(o.amount * 100), 0) / 100, selection.currency)}`;
-  $('#operations-list').innerHTML = operationTable(details.filter(o => `${o.label} ${o.account} ${o.holder || ""} ${o.cardLast4 || ""}`.toLocaleLowerCase('fr').includes(search)));
-  $('#recent-operations').innerHTML = operationTable(filtered.slice(0, 5));
-  $('#review-list').innerHTML = operationTable(state.data.operations.filter(o => o.status !== 'ignored' && o.category === 'À catégoriser'), true);
+  const visible = details.filter(o => `${o.label} ${o.account} ${o.holder || ""} ${o.cardLast4 || ""}`.toLocaleLowerCase('fr').includes(search));
+  $('#operations-list').innerHTML = operationTable(visible);
+  const totals = MyComptaOperationTotals.calculate(visible);
+  $('#operations-totals').innerHTML = `<strong>${visible.length} opération(s) affichée(s)</strong><div class="operation-total-values">${totals.length ? totals.map(total => `<div><span>Dépenses : <strong>${esc(money(total.expenses, total.currency))}</strong></span>${total.income ? `<span>Revenus / remboursements : ${esc(money(total.income, total.currency))}</span><span>Solde dépenses − revenus : <strong>${esc(money(total.net, total.currency))}</strong></span>` : ''}</div>`).join('') : '<span>Aucun montant à totaliser.</span>'}</div><small>Hors opérations ignorées, virements et règlements de carte. Totaux selon les filtres affichés.</small>`;
+  $('#recent-operations').innerHTML = operationTable(allForPeriod.slice(0, 5));
+  $('#review-list').innerHTML = operationTable(state.data.operations.filter(o => matchesHolder(o) && o.status !== 'ignored' && o.category === 'À catégoriser'), true);
 }
 function summary() {
   const expense = state.data.operations.filter(o => MyComptaPeriod.matches(o.date, selectedPeriod()) && o.status !== 'ignored' && o.type === 'expense');
@@ -259,6 +269,10 @@ function summary() {
   return { expense, totals, groups };
 }
 function render() {
+  const previousHolder = $('#holder-filter').value;
+  const holders = [...new Set(state.data.operations.map(o => holderKey(o.holder)).filter(Boolean))].sort((a, b) => a.localeCompare(b, 'fr'));
+  $('#holder-filter').innerHTML = '<option value="">Tous les titulaires</option>' + holders.map(holder => `<option value="${esc('holder:' + holder)}">${esc(holder)}</option>`).join('') + '<option value="unknown">Non renseigné</option>';
+  if ([...$('#holder-filter').options].some(option => option.value === previousHolder)) $('#holder-filter').value = previousHolder;
   MyComptaAnnual.render(state.data.operations);
   renderCoverage();
   if (state.data.categories?.length) categories = state.data.categories;
