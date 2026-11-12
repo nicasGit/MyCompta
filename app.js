@@ -165,15 +165,15 @@ function createApp(store = new GoogleStore(), config = runtimeConfig()) {
       const data = await store.read();
       const document = data.documents.find(d => d.id === req.params.id);
       if (!document) throw Object.assign(new Error('Document introuvable.'), { status: 404 });
-      if (document.source !== 'Cembra') throw Object.assign(new Error('Cette relecture est réservée aux relevés Cembra.'), { status: 400 });
+      if (!['Cembra', 'TopCard'].includes(document.source)) throw Object.assign(new Error('Relecture disponible pour Cembra et TopCard.'), { status: 400 });
       const buffer = await store.downloadPdf(document.driveId);
-      const parsed = await extractPdf(buffer, 'Cembra');
+      const parsed = await extractPdf(buffer, document.source);
       if (!parsed.operations.length) throw Object.assign(new Error(parsed.note + ' Les opérations existantes sont conservées.'), { status: 422 });
       const operations = parsed.operations.map(o => ({ ...o, id: crypto.randomUUID(), documentId: document.id,
-        account: 'Cembra', category: 'À catégoriser', type: o.type, status: 'validated', createdBy: req.user?.email || '' }));
+        account: document.source, category: 'À catégoriser', type: o.type, status: 'validated', createdBy: req.user?.email || '' }));
       const storedName = parsed.suggestedName || document.name;
       if (storedName !== document.name) await store.renamePdf(document.driveId, storedName);
-      await store.replaceImport({ ...document, name: storedName, note: parsed.note, status: 'Importé' }, operations);
+      await store.replaceImport({ ...document, name: storedName, contentHash: contentHash(document.source, parsed.operations), statementMonth: document.statementMonth || parsed.statementMonth || '', note: parsed.note, status: 'Importé' }, operations);
       return { count: operations.length, note: parsed.note };
     });
     res.json(result);

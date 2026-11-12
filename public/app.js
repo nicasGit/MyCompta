@@ -157,11 +157,11 @@ document.addEventListener('click', event => {
     await load();
     message(`Document renommé : ${result.name}`);
   });
-  if (reanalyse && requireStorage() && window.confirm('Relire le détail Cembra ? Les lignes du document seront remplacées par la nouvelle extraction. Les catégories et exclusions seront conservées pour les opérations retrouvées ; les lignes sans correspondance seront remplacées.')) action(async () => {
+  if (reanalyse && requireStorage() && window.confirm('Relire le détail du relevé ? Les lignes du document seront remplacées par la nouvelle extraction. Les catégories et exclusions seront conservées pour les opérations retrouvées ; les lignes sans correspondance seront remplacées.')) action(async () => {
     message('Relecture du détail Cembra depuis le PDF archivé…');
     const result = await api('/api/documents/' + encodeURIComponent(reanalyse.dataset.reanalyse) + '/reanalyse', { method: 'POST' });
     await load();
-    message(`${result.count} opération(s) Cembra relues et prises en compte. ${result.note}`);
+    message(`${result.count} opération(s) relues et prises en compte. ${result.note}`);
   });
 });
 $('#import-shortcut').onclick = () => { showView('documents'); $('#upload-form select').focus(); };
@@ -186,8 +186,8 @@ function docRows(documents, compact = false) {
   if (!documents.length) return empty('Votre bibliothèque commence ici', 'Importez votre premier relevé PDF.');
   return [...documents].reverse().map(d => {
     const url = state.demo ? null : pdfUrl(d);
-    const reanalyse = !compact && !state.demo && d.source === 'Cembra'
-      ? `<p><button class="text-button" data-reanalyse="${esc(d.id)}">Relire le détail Cembra</button></p><p><button class="text-button" data-rename="${esc(d.id)}">Renommer avec la date de facture</button></p>` : '';
+    const reanalyse = !compact && !state.demo && ['Cembra', 'TopCard'].includes(d.source)
+      ? `<p><button class="text-button" data-reanalyse="${esc(d.id)}">Relire le détail ${esc(d.source)}</button></p>${d.source === 'Cembra' ? `<p><button class="text-button" data-rename="${esc(d.id)}">Renommer avec la date de facture</button></p>` : ''}` : '';
     const operations = state.data.operations.filter(o => o.documentId === d.id);
     const pending = operations.filter(o => o.status !== 'ignored' && o.category === 'À catégoriser').length;
     const status = operations.length ? (pending ? `${pending} à catégoriser` : 'Traité') : 'Saisie nécessaire';

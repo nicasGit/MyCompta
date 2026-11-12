@@ -2,8 +2,8 @@
   const valid = value => /^\d{4}-(0[1-9]|1[0-2])$/.test(value || '');
   function month(document) {
     if (valid(document.statementMonth)) return document.statementMonth;
-    const match = /^Cembra - (\d{4}-(?:0[1-9]|1[0-2]))-\d{2}\.pdf$/i.exec(document.name || '');
-    return document.source === 'Cembra' && match ? match[1] : '';
+    const match = /^(Cembra|TopCard) - (\d{4}-(?:0[1-9]|1[0-2]))-\d{2}\.pdf$/i.exec(document.name || '');
+    return match && document.source.toLowerCase() === match[1].toLowerCase() ? match[2] : '';
   }
   function coverage(documents, source, start, end) {
     if (!valid(start) || !valid(end) || start > end) return [];
