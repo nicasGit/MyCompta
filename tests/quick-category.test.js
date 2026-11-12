@@ -3,6 +3,36 @@ const assert = require('node:assert/strict');
 const { GoogleStore } = require('../google/store');
 const { categorizeOperation } = require('../services/suppliers');
 
+test('short filters match future descriptions and rescan changes only validated selections that remain uncategorized', async () => {
+  const store = new GoogleStore();
+  const base = { date: '2026-10-01', amount: 10, currency: 'CHF', type: 'expense', status: 'validated', category: 'À catégoriser' };
+  const data = { operations: [
+    { ...base, id: 'one', label: 'toto titi 1829', _row: 2 },
+    { ...base, id: 'two', label: 'TOTO Paris 9999', _row: 3 },
+    { ...base, id: 'manual', label: 'TOTO Paris', category: 'Loisirs', _row: 4 },
+    { ...base, id: 'ignored', label: 'toto', status: 'ignored', _row: 5 },
+    { ...base, id: 'transfer', label: 'toto', type: 'transfer', _row: 6 }
+  ], suppliers: [], categories: [] };
+  store.read = async () => structuredClone(data);
+  store.context = async () => ({ base: 'https://sheets.example' });
+  const requests = [];
+  store.json = async (url, method, body) => requests.push(body);
+  await store.assignCategory('one', 'Alimentation', 'toto');
+  const [id, name, category] = requests[0].data[1].values[0];
+  assert.equal(name, 'toto');
+  data.suppliers.push({ id, name, category, _row: 2 });
+  await assert.rejects(() => store.assignCategory('one', 'Alimentation', 'autre'), /ne correspond pas/);
+  const preview = await store.previewCategorization();
+  assert.deepEqual(preview.map(item => item.id), ['one', 'two']);
+  assert.equal(requests.length, 1); // Preview does not write.
+  assert.deepEqual(await store.confirmCategorization([{ id: 'two', category: 'Alimentation' }]), { updated: 1 });
+  assert.deepEqual(requests[1].data, [{ range: 'Operations!H3', values: [['Alimentation']] }]);
+  data.operations[1].category = 'Loisirs';
+  await assert.rejects(() => store.confirmCategorization([{ id: 'two', category: 'Alimentation' }]), /changé/);
+  await assert.rejects(() => store.confirmCategorization([{ id: 'one', category: 'Alimentation' }, { id: 'one', category: 'Alimentation' }]), /invalide/);
+  assert.equal(requests.length, 2);
+});
+
 test('quick category atomically writes a category and reusable supplier rule without modifying financial cells', async () => {
   const store = new GoogleStore();
   const data = { operations: [{ id: 'op', label: 'Animalerie Lausanne', type: 'expense', status: 'validated', _row: 8 }], suppliers: [], categories: [{ name: 'Animaux' }] };

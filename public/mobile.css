@@ -1,5 +1,10 @@
 .brand-row { display:flex; flex-direction:column; gap:18px; align-items:flex-start; }
 .install-button { font-size:11px; }
+.rule-filter-label { display:flex; flex-direction:column; gap:8px; margin:18px 0; }
+.rule-filter-label input { width:100%; min-height:48px; font-size:16px; }
+#categorization-preview { width:calc(100% - 32px); max-width:1050px; max-height:85dvh; overflow:auto; }
+#rescan-results { margin:18px 0; }
+#rescan-results input { width:22px; height:22px; min-height:22px; }
 .month-stepper { display:inline-flex; align-items:center; gap:6px; min-width:0; max-width:100%; }
 .month-stepper:has(input[hidden]) { display:none; }
 .month-stepper .month-step { flex:0 0 44px; min-width:44px; min-height:44px; padding:4px; font-size:25px; line-height:1; }

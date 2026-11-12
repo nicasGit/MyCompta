@@ -212,7 +212,7 @@ function createApp(store = new GoogleStore(), config = runtimeConfig()) {
   });
   app.delete('/api/suppliers/:id', async (req, res) => res.json(await serialize(() => store.deleteSupplier(req.params.id))));
   app.post('/api/operations/:id/category', async (req, res) => {
-    res.json(await serialize(() => store.assignCategory(req.params.id, req.body.category)));
+    res.json(await serialize(() => store.assignCategory(req.params.id, req.body.category, req.body.filter)));
   });
   app.put('/api/documents/:id/month', async (req, res) => {
     res.json(await serialize(() => store.setDocumentMonth(req.params.id, req.body.month)));
@@ -220,6 +220,8 @@ function createApp(store = new GoogleStore(), config = runtimeConfig()) {
   app.post('/api/categories', async (req, res) => {
     res.status(201).json(await serialize(() => store.addCategory(req.body.name)));
   });
+  app.post('/api/categorize/preview', async (req, res) => res.json({ matches: await store.previewCategorization() }));
+  app.post('/api/categorize/confirm', async (req, res) => res.json(await serialize(() => store.confirmCategorization(req.body.items))));
   app.post('/api/categorize', async (req, res) => res.json(await serialize(() => store.categorizeOperations())));
   app.use(express.static(path.join(__dirname, 'public'), { setHeaders(res, file) {
     if (/\.(?:html|js|css|webmanifest)$/.test(file)) res.setHeader('Cache-Control', 'no-cache');

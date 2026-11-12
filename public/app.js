@@ -99,6 +99,8 @@ function openCategoryMenu(id) {
   const dialog = $('#category-menu');
   dialog.dataset.operationId = id;
   $('#category-menu-label').textContent = operation.label;
+  $('#category-rule-filter').value = operation.label.slice(0, 120);
+  $('#category-rule-error').hidden = true;
   $('#category-menu-options').innerHTML = categories.filter(category => category !== 'À catégoriser').map(category => `<button type="button" class="secondary" data-assign-category="${esc(category)}">${esc(category)}</button>`).join('');
   dialog.showModal();
 }
@@ -109,6 +111,32 @@ $('#review-list').addEventListener('contextmenu', event => {
   openCategoryMenu(row.dataset.operationId);
 });
 $('#close-category-menu').onclick = () => $('#category-menu').close();
+$('#close-categorization-preview').onclick = () => $('#categorization-preview').close();
+$('#preview-categorization').onclick = () => {
+  if (!requireStorage()) return;
+  action(async () => {
+    const result = await api('/api/categorize/preview', { method: 'POST' });
+    state.rescanMatches = result.matches;
+    $('#rescan-count').textContent = `${result.matches.length} correspondance(s) trouvée(s). Aucune modification appliquée à ce stade.`;
+    $('#rescan-results').innerHTML = result.matches.length ? `<table><thead><tr><th>Appliquer</th><th>Date</th><th>Libellé</th><th>Montant</th><th>Filtre</th><th>Catégorie proposée</th></tr></thead><tbody>${result.matches.map((item, index) => `<tr><td><input type="checkbox" data-rescan-index="${index}" checked aria-label="Appliquer à ${esc(item.label)}"></td><td>${esc(item.date)}</td><td>${esc(item.label)}</td><td>${esc(money(item.amount, item.currency))}</td><td>${esc(item.supplier)}</td><td>${esc(item.category)}</td></tr>`).join('')}</tbody></table>` : '<p>Aucune opération à classer avec les règles actuelles.</p>';
+    $('#confirm-categorization').disabled = !result.matches.length;
+    $('#categorization-preview').showModal();
+  });
+};
+$('#confirm-categorization').onclick = () => {
+  const items = [...document.querySelectorAll('[data-rescan-index]:checked')].map(input => state.rescanMatches[Number(input.dataset.rescanIndex)]).map(({ id, category }) => ({ id, category }));
+  if (!items.length) { $('#rescan-count').textContent = 'Sélectionnez au moins une ligne.'; return; }
+  if (items.length > 2000) { $('#rescan-count').textContent = 'Sélectionnez au maximum 2000 lignes par validation.'; return; }
+  action(async () => {
+    let result;
+    try { result = await api('/api/categorize/confirm', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ items }) }); }
+    catch (error) { $('#rescan-count').textContent = error.message; return; }
+    $('#categorization-preview').close();
+    $('#rescan-offer').hidden = true;
+    await load();
+    message(`${result.updated} opération(s) classée(s) après validation.`);
+  });
+};
 
 document.addEventListener('click', event => {
   const quickCategory = event.target.closest('[data-quick-category]');
@@ -116,11 +144,14 @@ document.addEventListener('click', event => {
   const assign = event.target.closest('[data-assign-category]');
   if (assign && !state.busy) {
     const id = $('#category-menu').dataset.operationId, category = assign.dataset.assignCategory;
+    const filter = $('#category-rule-filter').value.trim();
+    if (!$('#category-rule-filter').reportValidity()) return;
     $('#category-menu').close();
     action(async () => {
-      const result = await api('/api/operations/' + encodeURIComponent(id) + '/category', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ category }) });
+      const result = await api('/api/operations/' + encodeURIComponent(id) + '/category', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ category, filter }) });
       await load();
       message(`Catégorie ${category} attribuée. Correspondance mémorisée pour « ${result.supplier} ». Vous pouvez la modifier dans Fournisseurs.`);
+      $('#rescan-offer').hidden = false;
     });
   }
   const categoryRow = event.target.closest('[data-budget-category]');

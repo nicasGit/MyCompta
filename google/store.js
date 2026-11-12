@@ -3,7 +3,7 @@ const path = require('node:path');
 const crypto = require('node:crypto');
 const { CATEGORIES, validateOperation, reconcileImport } = require('../services/operations');
 const { categoryNames, validateCategory, categoryKey } = require('../services/categories');
-const { DEFAULT_SUPPLIERS, normalizeSupplier, validateSupplier, categorizeOperation } = require('../services/suppliers');
+const { DEFAULT_SUPPLIERS, normalizeSupplier, validateSupplier, matchingSupplier, categorizeOperation } = require('../services/suppliers');
 const { runtimeConfig } = require('../services/config');
 
 const TABLES = {
@@ -242,13 +242,14 @@ class GoogleStore {
     })().finally(() => { this.suppliersSetup = null; });
     return this.suppliersSetup;
   }
-  async assignCategory(id, category) {
+  async assignCategory(id, category, filter) {
     const data = await this.read();
     const operation = data.operations.find(item => item.id === id);
     if (!operation) throw fail('Opération introuvable.', 404);
     if (operation.status === 'ignored' || !['expense', 'income'].includes(operation.type)) throw fail('Cette opération ne peut pas être classée automatiquement.', 400);
-    const name = operation.label.trim().replace(/\s+/g, ' ').slice(0, 120);
+    const name = filter === undefined ? operation.label.trim().replace(/\s+/g, ' ').slice(0, 120) : filter;
     const rule = validateSupplier({ name, category }, categoryNames(data.categories));
+    if (!matchingSupplier(operation.label, [rule])) throw fail('Ce filtre ne correspond pas au libellé sélectionné.', 400);
     const existing = data.suppliers.find(item => normalizeSupplier(item.name) === normalizeSupplier(rule.name));
     const supplier = { ...rule, id: existing?.id || crypto.randomUUID() };
     const row = existing?._row || Math.max(1, ...data.suppliers.map(item => item._row)) + 1;
@@ -259,6 +260,29 @@ class GoogleStore {
       { range: `Fournisseurs!A${row}:C${row}`, values: [rowFor('Fournisseurs', supplier)] }
     ] });
     return { category, supplier: supplier.name };
+  }
+  async previewCategorization() {
+    const data = await this.read();
+    return data.operations.flatMap(operation => {
+      const next = categorizeOperation(operation, data.suppliers);
+      if (next.category === operation.category) return [];
+      return [{ id: operation.id, date: operation.date, label: operation.label, amount: operation.amount,
+        currency: operation.currency, category: next.category, supplier: matchingSupplier(operation.label, data.suppliers).name }];
+    });
+  }
+  async confirmCategorization(items) {
+    if (!Array.isArray(items) || !items.length || items.length > 2000 || items.some(item => typeof item?.id !== 'string' || typeof item.category !== 'string')
+      || new Set(items.map(item => item.id)).size !== items.length) throw fail('Sélection invalide (1 à 2000 opérations).', 400);
+    const data = await this.read();
+    const changes = items.map(item => {
+      const old = data.operations.find(operation => operation.id === item.id);
+      const next = old && categorizeOperation(old, data.suppliers);
+      if (!old || next.category === old.category || next.category !== item.category) throw fail('Les correspondances ont changé. Relancez la recherche avant de valider.', 409);
+      return { range: `Operations!H${old._row}`, values: [[next.category]] };
+    });
+    const { base } = await this.context();
+    await this.json(base + '/values:batchUpdate', 'POST', { valueInputOption: 'RAW', data: changes });
+    return { updated: changes.length };
   }
   async saveSupplier(supplier, update = false) {
     const data = await this.read();
