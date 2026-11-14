@@ -87,3 +87,16 @@ test('quick category atomically writes a category and reusable supplier rule wit
   await assert.rejects(() => store.assignCategory('op', 'Animaux'), /classée/);
   assert.equal(requests.length, 2);
 });
+
+test('one-off categorization changes only the selected operation and preserves supplier rules', async () => {
+  const store = new GoogleStore();
+  store.read = async () => ({ operations: [{ id: 'op', label: 'Coop 123', type: 'expense', status: 'validated', _row: 8 }], categories: [{ name: 'Alimentation' }], suppliers: [{ id: 'existing', name: 'Coop', category: 'Loisirs', _row: 2 }] });
+  store.context = async () => ({ base: 'https://sheets.example' });
+  const requests = [];
+  store.json = async (url, method, body) => requests.push(body);
+  assert.deepEqual(await store.assignCategory('op', 'Alimentation', '', false), { category: 'Alimentation', supplier: null });
+  assert.deepEqual(requests, [{ valueInputOption: 'RAW', data: [{ range: 'Operations!H8', values: [['Alimentation']] }] }]);
+  await assert.rejects(() => store.assignCategory('op', 'Inconnue', '', false), /invalide/);
+  await assert.rejects(() => store.assignCategory('op', 'Alimentation', '', 'false'), /invalide/);
+  assert.equal(requests.length, 1);
+});

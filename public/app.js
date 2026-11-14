@@ -149,6 +149,9 @@ function openCategoryMenu(id) {
   if (!operation || !['expense', 'income'].includes(operation.type)) return;
   const dialog = $('#category-menu');
   dialog.dataset.operationId = id;
+  $('#category-remember-filter').checked = true;
+  $('#category-rule-settings').hidden = false;
+  $('#category-rule-filter').disabled = false;
   $('#category-menu-label').textContent = operation.label;
   $('#category-rule-filter').value = operation.label.slice(0, 120);
   $('#category-rule-error').hidden = true;
@@ -163,6 +166,12 @@ for(const target of ['#review-list','#operations-list'])$(target).addEventListen
   event.preventDefault();
   openCategoryMenu(row.dataset.operationId);
 });
+$('#category-remember-filter').onchange = () => {
+  const remember = $('#category-remember-filter').checked;
+  $('#category-rule-settings').hidden = !remember;
+  $('#category-rule-filter').disabled = !remember;
+  $('#category-rule-error').hidden = true;
+};
 $('#close-category-menu').onclick = () => $('#category-menu').close();
 $('#close-categorization-preview').onclick = () => $('#categorization-preview').close();
 async function openCategorizationPreview(onlyWithMatches = false, reclassify = false) {
@@ -209,12 +218,14 @@ document.addEventListener('click', event => {
   }
   if (assign) {
     const id = $('#category-menu').dataset.operationId, category = assign.dataset.assignCategory;
+    const rememberFilter = $('#category-remember-filter').checked;
     const filter = $('#category-rule-filter').value.trim();
-    if (!$('#category-rule-filter').reportValidity()) return;
+    if (rememberFilter && !$('#category-rule-filter').reportValidity()) return;
     $('#category-menu').close();
     action(async () => {
-      const result = await api('/api/operations/' + encodeURIComponent(id) + '/category', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ category, filter }) });
+      const result = await api('/api/operations/' + encodeURIComponent(id) + '/category', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ category, filter, rememberFilter }) });
       await load();
+      if (!rememberFilter) { message(`Catégorie ${category} attribuée uniquement à cette opération.`); return; }
       message(`Catégorie ${category} attribuée. Correspondance mémorisée pour « ${result.supplier} ». Vous pouvez la modifier dans Fournisseurs.`);
       $('#rescan-offer').hidden = false;
       await openCategorizationPreview(true);

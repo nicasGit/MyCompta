@@ -263,7 +263,7 @@ function createApp(store = new GoogleStore(), config = runtimeConfig()) {
   });
   app.delete('/api/suppliers/:id', async (req, res) => res.json(await serialize(() => store.deleteSupplier(req.params.id))));
   app.post('/api/operations/:id/category', async (req, res) => {
-    res.json(await serialize(() => store.assignCategory(req.params.id, req.body.category, req.body.filter)));
+    res.json(await serialize(() => store.assignCategory(req.params.id, req.body.category, req.body.filter, req.body.rememberFilter)));
   });
   app.put('/api/documents/:id/month', async (req, res) => {
     res.json(await serialize(() => store.setDocumentMonth(req.params.id, req.body.month)));

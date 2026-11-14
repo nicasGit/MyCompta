@@ -285,11 +285,20 @@ class GoogleStore {
     })().finally(() => { this.suppliersSetup = null; });
     return this.suppliersSetup;
   }
-  async assignCategory(id, category, filter) {
+  async assignCategory(id, category, filter, rememberFilter = true) {
+    if (typeof rememberFilter !== 'boolean') throw fail('Option de m\u00e9morisation invalide.', 400);
     const data = await this.read();
     const operation = data.operations.find(item => item.id === id);
     if (!operation) throw fail('Opération introuvable.', 404);
     if (operation.status === 'ignored' || !['expense', 'income'].includes(operation.type)) throw fail('Cette opération ne peut pas être classée automatiquement.', 400);
+    if (!rememberFilter) {
+      if (!categoryNames(data.categories).includes(category) || category === '\u00c0 cat\u00e9goriser') throw fail('Cat\u00e9gorie invalide.', 400);
+      const { base } = await this.context();
+      await this.json(base + '/values:batchUpdate', 'POST', { valueInputOption: 'RAW', data: [
+        { range: `Operations!H${operation._row}`, values: [[category]] }
+      ] });
+      return { category, supplier: null };
+    }
     const name = filter === undefined ? operation.label.trim().replace(/\s+/g, ' ').slice(0, 120) : filter;
     const rule = validateSupplier({ name, category }, categoryNames(data.categories));
     if (!matchingSupplier(operation.label, [rule])) throw fail('Ce filtre ne correspond pas au libellé sélectionné.', 400);
