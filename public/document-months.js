@@ -10,7 +10,7 @@
     const result = [];
     let cursor = start;
     while (cursor <= end && result.length < 120) {
-      const count = documents.filter(document => document.source === source && month(document) === cursor).length;
+      const count = documents.filter(document => document.source === source && document.statementKind !== 'annual' && month(document) === cursor).length;
       result.push({ month: cursor, count });
       let [year, m] = cursor.split('-').map(Number);
       if (++m > 12) { year++; m = 1; }

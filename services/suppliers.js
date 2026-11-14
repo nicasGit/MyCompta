@@ -22,7 +22,7 @@ function matchingSupplier(label, suppliers = []) {
     .find(s => text.includes(` ${normalizeSupplier(s.name)} `));
 }
 function categorizeOperation(operation, suppliers, reclassify = false) {
-  if ((!reclassify && operation.category !== 'À catégoriser') || operation.status === 'ignored' || !['expense', 'income'].includes(operation.type)) return operation;
+  if (operation.isSavings || (!reclassify && operation.category !== 'À catégoriser') || operation.status === 'ignored' || !['expense', 'income'].includes(operation.type)) return operation;
   const rule = matchingSupplier(operation.label, suppliers);
   return rule ? { ...operation, category: rule.category } : operation;
 }

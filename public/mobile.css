@@ -1,5 +1,9 @@
 .brand-row { display:flex; flex-direction:column; gap:18px; align-items:flex-start; }
 .install-button { font-size:11px; }
+#bank-accounts-list { margin-top:20px; }
+#reconciliation-results table { font-size:11px; }
+#reconciliation-results td { max-width:280px; white-space:normal; overflow-wrap:anywhere; }
+.bank-annual { padding:16px 0; border-bottom:1px solid var(--border); }
 #category-management { width:calc(100% - 32px); max-width:560px; max-height:85dvh; overflow:auto; }
 #category-list { align-items:stretch; }
 #category-list button { min-height:44px; white-space:normal; }
@@ -105,3 +109,31 @@
   .brand { font-size:19px; gap:6px; }
   .install-button { font-size:10px; }
 }
+#pdf-dropzone { border:2px dashed var(--accent, #3974c5); border-radius:14px; padding:24px; text-align:center; cursor:pointer; margin:16px 0; background:rgba(57,116,197,.05); }
+#pdf-dropzone.dragging, #pdf-dropzone:focus-visible { background:rgba(57,116,197,.15); outline:2px solid #3974c5; }
+.import-issues pre { white-space:pre-wrap; overflow-wrap:anywhere; font-size:12px; padding:12px; background:rgba(57,116,197,.06); }
+#import-inbox-list .panel, #savings-results .panel { margin-top:16px; }
+#import-inbox-list h2 { overflow-wrap:anywhere; }
+.correction-row { min-width:0; margin:16px 0; padding:14px; border:1px solid #b6c8df; border-radius:10px; }
+.correction-row legend { max-width:100%; white-space:normal; overflow-wrap:anywhere; font-weight:600; }
+.correction-row label { min-width:0; }
+.correction-row input, .correction-row select { width:100%; min-width:0; }
+.nav[data-view="importerrors"] b { display:inline-block; }
+.partial-import-choice { flex-basis:100% !important; flex-direction:row; align-items:flex-start; line-height:1.6; } .partial-import-choice input { width:auto; flex-shrink:0; }
+.operation-table .holder-cell { width:120px; min-width:90px; max-width:120px; white-space:normal; overflow-wrap:anywhere; }
+.operation-table .amount { min-width:100px; white-space:nowrap; font-variant-numeric:tabular-nums; }
+#holder-filter { width:200px; text-overflow:ellipsis; }
+@media(max-width:720px) { #holder-label { width:auto; max-width:100%; } #holder-filter { width:180px; max-width:100%; } }
+.operations-scrollbar { width:100%; max-width:100%; height:20px; overflow-x:scroll; overflow-y:hidden; margin:8px 0; scrollbar-color:#6a8ab7 #e8eff8; scrollbar-width:auto; }
+.operations-scrollbar>div { height:1px; }
+.operations-scrollbar::-webkit-scrollbar, #operations-list::-webkit-scrollbar { height:14px; }
+.operations-scrollbar::-webkit-scrollbar-track, #operations-list::-webkit-scrollbar-track { background:#e8eff8; border-radius:8px; }
+.operations-scrollbar::-webkit-scrollbar-thumb, #operations-list::-webkit-scrollbar-thumb { background:#6a8ab7; border:3px solid #e8eff8; border-radius:8px; }
+#operations-list { max-width:100%; overflow-x:auto; scrollbar-gutter:stable; }
+.operation-table .holder-cell { width:75px; min-width:60px; max-width:80px; text-align:center; }
+.holder-icon { display:inline-flex; align-items:center; justify-content:center; width:34px; height:34px; font-size:24px; line-height:1; border-radius:50%; background:rgba(57,116,197,.08); cursor:help; }
+.holder-icon:focus-visible { outline:2px solid #3974c5; outline-offset:2px; }
+.holder-profiles-list { display:flex; flex-wrap:wrap; gap:8px; }
+.holder-profile-choice span { font-size:21px; vertical-align:middle; }
+#holder-profile-form select[name="icon"] { font-size:24px; min-width:80px; }
+.holder-profile-choice { max-width:100%; white-space:normal; overflow-wrap:anywhere; text-align:left; }

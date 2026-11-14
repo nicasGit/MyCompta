@@ -2,7 +2,7 @@
   function calculate(operations) {
     const totals = new Map();
     for (const operation of operations) {
-      if (operation.status === 'ignored' || !['expense', 'income'].includes(operation.type)) continue;
+      if (operation.isSavings || operation.status === 'ignored' || !['expense', 'income'].includes(operation.type)) continue;
       if (!totals.has(operation.currency)) totals.set(operation.currency, { currency: operation.currency, expenses: 0, income: 0 });
       totals.get(operation.currency)[operation.type === 'expense' ? 'expenses' : 'income'] += Math.round(operation.amount * 100);
     }

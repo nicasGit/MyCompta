@@ -7,9 +7,9 @@ const { DEFAULT_SUPPLIERS, normalizeSupplier, validateSupplier, matchingSupplier
 const { runtimeConfig } = require('../services/config');
 
 const TABLES = {
-  Documents: ['id', 'name', 'source', 'driveId', 'hash', 'importedAt', 'status', 'note', 'createdBy', 'contentHash', 'statementMonth'],
-  Operations: ['id', 'documentId', 'date', 'label', 'amount', 'currency', 'account', 'category', 'type', 'status', 'page', 'raw', 'holder', 'cardLast4', 'cardType', 'createdBy'],
-  Comptes: ['id', 'name', 'source', 'currency'],
+  Documents: ['id', 'name', 'source', 'driveId', 'hash', 'importedAt', 'status', 'note', 'createdBy', 'contentHash', 'statementMonth', 'accountId', 'clientNumber', 'periodStart', 'periodEnd', 'statementKind', 'importReport'],
+  Operations: ['id', 'documentId', 'date', 'label', 'amount', 'currency', 'account', 'category', 'type', 'status', 'page', 'raw', 'holder', 'cardLast4', 'cardType', 'createdBy', 'bankDirection', 'clientNumber', 'paymentNetwork', 'bookingDate', 'bankBalance'],
+  Comptes: ['id', 'name', 'source', 'currency', 'clientNumber', 'holder', 'iban', 'kind', 'icon'],
   Categories: ['name', 'rule', 'parent'],
   Budgets: ['month', 'category', 'amount'],
   Fournisseurs: ['id', 'name', 'category'],
@@ -182,10 +182,10 @@ class GoogleStore {
     const { base } = await this.context();
     await this.ensureSuppliers();
     const params = new URLSearchParams({ valueRenderOption: 'UNFORMATTED_VALUE', dateTimeRenderOption: 'FORMATTED_STRING' });
-    for (const name of Object.keys(TABLES)) params.append('ranges', `${name}!A:P`);
+    for (const name of Object.keys(TABLES)) params.append('ranges', `${name}!A:AZ`);
     const result = await this.request(base + '/values:batchGet?' + params);
     // Add missing trailing metadata columns without overwriting customized cells.
-    for (const [name, index, lengths] of [['Documents', 0, [10, 9, 8]], ['Operations', 1, [15, 12]], ['Categories', 3, [2]]]) {
+    for (const [name, index, lengths] of [['Documents', 0, [11, 10, 9, 8]], ['Operations', 1, [16, 15, 12]], ['Comptes', 2, [8, 7, 4]], ['Categories', 3, [2]]]) {
       const rows = result.valueRanges[index]?.values || [];
       const header = rows[0];
       if (!header) continue;
@@ -217,7 +217,30 @@ class GoogleStore {
       catch (error) { throw fail(`Fournisseur invalide dans Sheets, ligne ${s._row} : ${error.message}`, 409); }
     });
     if (new Set(suppliers.map(s => s.id)).size !== suppliers.length || new Set(suppliers.map(s => normalizeSupplier(s.name))).size !== suppliers.length) throw fail('Des fournisseurs sont en double dans Sheets. Corrigez les doublons dans l’onglet Fournisseurs.', 409);
-    return { documents: data.Documents, operations, accounts: data.Comptes, categories: data.Categories, budgets, suppliers };
+    for (const operation of operations) {
+      const mapping = data.Comptes.find(account => account.id === operation.account)
+        || data.Comptes.find(account => account.id === 'client:' + operation.clientNumber && operation.clientNumber);
+      if (mapping?.holder) operation.holder = mapping.holder;
+    }
+    return { documents: data.Documents, operations:require('../services/savings').markSavings(operations,data.Comptes), accounts: data.Comptes.filter(row=>row.kind!=='holder'), holders:data.Comptes.filter(row=>row.kind==='holder'), categories: data.Categories, budgets, suppliers };
+  }
+  async saveHolder(input){
+    const {icons,key}=require('../public/holder-icons');
+    if(typeof input?.holder!=='string'||!key(input.holder)||input.holder.length>150||typeof input.name!=='string'||!input.name.trim()||input.name.length>100||!icons.includes(input.icon))throw fail('Titulaire, libellé et icône valides requis.');
+    const data=await this.read(),old=(data.holders||[]).find(row=>key(row.holder)===key(input.holder));
+    const value={id:'holder:'+crypto.createHash('sha256').update(key(input.holder)).digest('hex').slice(0,24),holder:input.holder.trim(),name:input.name.trim(),icon:input.icon,kind:'holder',source:'Titulaire'};
+    await this.writeRow('Comptes',value,old?._row);return value;
+  }
+  async saveAccount(input) {
+    if (typeof input?.id !== 'string' || !/^(?:UBS [\dA-Z.-]+|client:\d{3}-\d+|PostFinance [\w .-]+)$/.test(input.id)
+      || typeof input.holder !== 'string' || input.holder.length>150) throw fail('Compte / client et titulaire invalides.',400);
+    const data=await this.read(),old=data.accounts.find(account=>account.id===input.id);
+    const value={...(old||{}),id:input.id,name:String(input.name||old?.name||input.id).slice(0,100),
+      source:input.id.startsWith('PostFinance ')?'PostFinance':'UBS',currency:input.currency||old?.currency||'CHF',
+      clientNumber:String(input.clientNumber||old?.clientNumber||input.id.match(/\d{3}-\d+/)?.[0]||''),holder:input.holder.trim(),iban:String(input.iban||old?.iban||'').replace(/\s/g,'').slice(0,40),kind:input.kind||old?.kind||'current'};
+    if(!['current','savings'].includes(value.kind)||value.kind==='savings'&&value.id.startsWith('client:'))throw fail('Le type Épargne doit être attribué à un compte précis.',400);
+    if(!['CHF','EUR','USD','GBP'].includes(value.currency))throw fail('Devise invalide.',400);
+    return this.writeRow('Comptes',value,old?._row);
   }
   async addCategory(input, parent = '') {
     const name = validateCategory(input);
@@ -393,6 +416,8 @@ class GoogleStore {
     if (update && !old) throw fail('Opération introuvable.', 404);
     if (operation.documentId && !data.documents.some(d => d.id === operation.documentId)) throw fail('Document introuvable.');
     if (old) operation.createdBy = old.createdBy || '';
+    if (old) for (const field of ['clientNumber','bookingDate','bankBalance']) operation[field]=old[field]||'';
+    if (old?.bankDirection) operation.bankDirection=old.bankDirection;
     await this.writeRow('Operations', operation, old?._row);
     return operation;
   }

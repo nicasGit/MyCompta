@@ -199,8 +199,8 @@ test('legacy Sheets adds card identity headers without changing existing operati
   assert.equal(data.operations[0].holder, '');
   assert.equal(data.operations[0].amount, operation().amount);
   assert.equal(calls.length, 1);
-  assert.ok(calls[0][0].endsWith('/values/Operations!M1:P1?valueInputOption=RAW'));
-  assert.deepEqual(calls[0][1], { values: [['holder', 'cardLast4', 'cardType', 'createdBy']] });
+  assert.ok(calls[0][0].endsWith('/values/Operations!M1:U1?valueInputOption=RAW'));
+  assert.deepEqual(calls[0][1], { values: [TABLES.Operations.slice(12)] });
   values.push('existing custom content');
   await assert.rejects(() => store.read(), /déjà utilisées/);
   assert.equal(calls.length, 1);
@@ -213,7 +213,7 @@ test('card identity survives validation and Sheets serialization', async t => {
   let request;
   const store = await withStore(t, async (url, options) => { request = JSON.parse(options.body); return json({}); });
   await store.writeRow('Operations', value, 3);
-  assert.deepEqual(request.values[0].slice(12), ['FLORENCE GALLEZ', '3706', 'principale', '']);
+  assert.deepEqual(request.values[0].slice(12, 16), ['FLORENCE GALLEZ', '3706', 'principale', '']);
 });
 
 test('HTTP flow: upload, deduplication, corrections, budgets and cross-origin protection', async t => {
@@ -233,17 +233,17 @@ test('HTTP flow: upload, deduplication, corrections, budgets and cross-origin pr
   assert.match(response.headers.get('Content-Security-Policy'), /frame-ancestors 'none'/);
   assert.equal((await fetch(base + '/api/budgets', { method: 'POST' })).status, 403);
   assert.equal((await fetch(base + '/api/budgets', { method: 'POST', headers: { 'X-MyCompta': '1', Origin: 'https://evil.test' } })).status, 403);
-  response = await fetch(base + '/api/documents?name=test.pdf&source=UBS', { method: 'POST', headers: { 'X-MyCompta': '1', 'Content-Type': 'application/pdf' }, body: pdf('02.11.2026 Migros 42.30 CHF') });
+  response = await fetch(base + '/api/documents?name=test.pdf&source=Autre', { method: 'POST', headers: { 'X-MyCompta': '1', 'Content-Type': 'application/pdf' }, body: pdf('02.11.2026 Migros 42.30 CHF') });
   assert.equal(response.status, 201);
   const imported = await response.json();
   assert.equal(imported.count, 1);
   assert.equal(data.operations[0].status, 'validated');
   assert.equal(data.operations[0].category, 'Alimentation');
-  response = await fetch(base + '/api/documents?name=test.pdf&source=UBS', { method: 'POST', headers: { 'X-MyCompta': '1', 'Content-Type': 'application/pdf' }, body: pdf('02.11.2026 Migros 42.30 CHF') });
+  response = await fetch(base + '/api/documents?name=test.pdf&source=Autre', { method: 'POST', headers: { 'X-MyCompta': '1', 'Content-Type': 'application/pdf' }, body: pdf('02.11.2026 Migros 42.30 CHF') });
   assert.equal((await response.json()).duplicate, true);
   assert.equal(uploads, 1);
   // A different PDF binary with the same transactions must not upload again.
-  response = await fetch(base + '/api/documents?name=another-export.pdf&source=UBS', { method: 'POST', headers: { 'X-MyCompta': '1', 'Content-Type': 'application/pdf' }, body: Buffer.concat([pdf('02.11.2026 Migros 42.30 CHF'), Buffer.from('\n% different export')]) });
+  response = await fetch(base + '/api/documents?name=another-export.pdf&source=Autre', { method: 'POST', headers: { 'X-MyCompta': '1', 'Content-Type': 'application/pdf' }, body: Buffer.concat([pdf('02.11.2026 Migros 42.30 CHF'), Buffer.from('\n% different export')]) });
   assert.equal(response.status, 200);
   assert.equal((await response.json()).duplicateReason, 'content');
   assert.equal(uploads, 1);

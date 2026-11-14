@@ -7,7 +7,7 @@
         if (file.size > 15 * 1024 * 1024) throw new Error('Ce fichier dépasse 15 Mo.');
         const response = await upload(file, source);
         results.push({ name: file.name, response });
-      } catch (error) { results.push({ name: file.name, error: error.message }); }
+      } catch (error) { results.push({ name: file.name, error: error.message, inboxId:error.inboxId }); }
       report({ index, file, results });
     }
     return results;

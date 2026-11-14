@@ -17,7 +17,9 @@ function parsePages(pages) {
   }
   return operations;
 }
-async function extractPdf(buffer, source = 'Autre') {
+async function extractPdf(buffer, source = 'Autre', options = {}) {
+  if (source === 'UBS') return require('../parsers/ubs').extractUBS(buffer, options);
+  if (source === 'PostFinance') return require('../parsers/postfinance').extractPostFinance(buffer, options);
   const { PDFParse } = require('pdf-parse');
   const parser = new PDFParse({ data: new Uint8Array(buffer) });
   try {

@@ -2,7 +2,7 @@
   function aggregate(operations, year, currency) {
     const groups = new Map();
     for (const operation of operations) {
-      if (operation.type !== 'expense' || operation.status === 'ignored' || operation.currency !== currency
+      if (operation.isSavings || operation.type !== 'expense' || operation.status === 'ignored' || operation.currency !== currency
         || !operation.date.startsWith(String(year) + '-')) continue;
       const month = Number(operation.date.slice(5, 7)) - 1;
       if (month < 0 || month > 11) continue;

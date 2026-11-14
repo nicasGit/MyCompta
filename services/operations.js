@@ -20,11 +20,14 @@ function validateOperation(input, categories = CATEGORIES) {
     category: input.category, type: input.type, status: input.status === 'ignored' ? 'ignored' : 'validated', account: String(input.account || '').slice(0, 100),
     holder: String(input.holder || '').trim().slice(0, 150), cardLast4, cardType: String(input.cardType || '').trim().slice(0, 40),
     createdBy: String(input.createdBy || '').slice(0, 254),
+    bankDirection: ['debit','credit'].includes(input.bankDirection) ? input.bankDirection : '',
+    clientNumber: String(input.clientNumber || '').slice(0,40), paymentNetwork: ['Cembra','TopCard'].includes(input.paymentNetwork) ? input.paymentNetwork : '',
+    bookingDate: String(input.bookingDate || '').slice(0,10), bankBalance: String(input.bankBalance ?? '').slice(0,40),
     documentId: String(input.documentId || '').slice(0, 100), page, raw: String(input.raw || '').slice(0, 2000) };
 }
 function summarize(operations, month) {
   const selectedMonth = /^\d{4}-(0[1-9]|1[0-2])$/.test(month || '') ? month : new Date().toISOString().slice(0, 7);
-  const expenses = operations.filter(o => o.date.startsWith(selectedMonth) && o.status !== 'ignored' && o.type === 'expense');
+  const expenses = operations.filter(o => !o.isSavings && o.date.startsWith(selectedMonth) && o.status !== 'ignored' && o.type === 'expense');
   const totals = {}, categories = {};
   for (const o of expenses) {
     const cents = Math.round(Number(o.amount) * 100);
@@ -32,7 +35,7 @@ function summarize(operations, month) {
     const key = `${o.category.split(' › ')[0]}|${o.currency}`;
     categories[key] = (categories[key] || 0) + cents;
   }
-  return { month: selectedMonth, count: expenses.length, uncategorized: operations.filter(o => o.status !== 'ignored' && o.category === 'À catégoriser').length,
+  return { month: selectedMonth, count: expenses.length, uncategorized: operations.filter(o => !o.isSavings && o.status !== 'ignored' && o.category === 'À catégoriser').length,
     totals: Object.fromEntries(Object.entries(totals).map(([key, cents]) => [key, cents / 100])),
     categories: Object.entries(categories).map(([key, cents]) => { const [category, currency] = key.split('|'); return { category, currency, amount: cents / 100 }; }).sort((a, b) => b.amount - a.amount) };
 }
@@ -45,8 +48,8 @@ function reconcileImport(incoming, existing) {
     if (index < 0) index = remaining.findIndex(old => matches(old) && !old.cardLast4);
     if (index < 0) return { ...operation, status: 'validated' };
     const [old] = remaining.splice(index, 1);
-    return { ...operation, id: old.id, category: old.category, account: old.account || operation.account,
-      type: old.type, status: old.status === 'ignored' ? 'ignored' : 'validated', createdBy: old.createdBy || '',
+    return { ...operation, id: old.id, category: old.category, account: operation.bankDirection ? operation.account : old.account || operation.account,
+      type: operation.bankDirection ? operation.type : old.type, status: old.status === 'ignored' ? 'ignored' : 'validated', createdBy: old.createdBy || '',
       holder: operation.holder || old.holder || '', cardLast4: operation.cardLast4 || old.cardLast4 || '', cardType: operation.cardType || old.cardType || '' };
   });
 }

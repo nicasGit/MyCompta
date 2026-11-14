@@ -7,6 +7,11 @@ const { validateOperation, summarize } = require('./services/operations');
 const { validateSupplier, categorizeOperation } = require('./services/suppliers');
 const { categoryNames } = require('./services/categories');
 const { contentHash, matchingDocument } = require('./services/document-duplicates');
+const {mergeBankStatement}=require('./services/bank-import');
+const bankSource=source=>['UBS','PostFinance'].includes(source);
+const {ImportInbox}=require('./services/import-inbox');
+const {detectSource}=require('./services/detect-source');
+const {buildReconciliation}=require('./services/bank-reconciliation');
 const { exec } = require("child_process");
 const { runtimeConfig } = require('./services/config');
 const { Household } = require('./services/household');
@@ -15,6 +20,7 @@ try { process.loadEnvFile(path.join(__dirname, '.env')); } catch (error) { if (e
 
 function createApp(store = new GoogleStore(), config = runtimeConfig()) {
   const app = express();
+  const inbox=new ImportInbox(store.directory?path.join(store.directory,"import-inbox"):null);
   const origin = config.origin;
   const household = config.multiUser ? new Household(store, config.ownerEmail) : null;
   const cookie = (req, name) => req.headers.cookie?.split(';').map(v => v.trim()).find(v => v.startsWith(name + '='))?.slice(name.length + 1);
@@ -119,37 +125,80 @@ function createApp(store = new GoogleStore(), config = runtimeConfig()) {
     const data = await store.read();
     res.json({ ...data, categories: categoryNames(data.categories), summary: summarize(data.operations, req.query.month) });
   });
-  app.post('/api/documents', express.raw({ type: 'application/pdf', limit: '15mb' }), async (req, res) => {
-    if (!Buffer.isBuffer(req.body) || !req.body.subarray(0, 1024).includes(Buffer.from('%PDF-'))) {
-      return res.status(400).json({ error: 'Sélectionnez un PDF valide (15 Mo maximum).' });
-    }
-    const name = String(req.query.name || 'document.pdf').replace(/[\\/\x00-\x1f]/g, '_').slice(0, 180);
-    const source = String(req.query.source || 'Autre');
-    if (!['UBS', 'PostFinance', 'Cembra', 'TopCard', 'Autre'].includes(source)) return res.status(400).json({ error: 'Source inconnue.' });
-    const hash = crypto.createHash('sha256').update(req.body).digest('hex');
-    const result = await serialize(async () => {
+  async function importDocument(buffer,{name,source,createdBy='',corrections=[],allowPartial=false}) {
+    const hash=crypto.createHash('sha256').update(buffer).digest('hex');
       const data = await store.read();
       const existing = data.documents.find(d => d.hash === hash);
       if (existing) return { duplicate: true, document: existing };
-      const parsed = await extractPdf(req.body, source);
+      if(source==='Auto')source=await detectSource(buffer);
+      let parsed;try{parsed=await extractPdf(buffer,source,{...data,corrections,allowPartial});}catch(error){error.source=source;throw error;}
       const fingerprint = contentHash(source, parsed.operations);
-      const sameData = matchingDocument(data, source, fingerprint);
+      const bankMerge=bankSource(source)?mergeBankStatement(data.operations,parsed):null;
+      const sameData = bankSource(source) ? (!bankMerge.operations.length && data.documents.find(document=>document.source===source&&document.accountId===parsed.accountId&&document.periodStart===parsed.periodStart&&document.periodEnd===parsed.periodEnd&&document.statementKind===parsed.statementKind)) : matchingDocument(data, source, fingerprint);
       if (sameData) return { duplicate: true, duplicateReason: 'content', document: sameData };
       const storedName = parsed.suggestedName || name;
-      const file = await store.uploadPdf(req.body, storedName, hash);
+      const file = await store.uploadPdf(buffer, storedName, hash);
       if (parsed.suggestedName) await store.renamePdf(file.id, storedName);
       const document = {
-        id: crypto.randomUUID(), name: storedName, source, driveId: file.id, hash, contentHash: fingerprint, statementMonth: parsed.statementMonth || '', createdBy: req.user?.email || '',
-        importedAt: new Date().toISOString(), status: parsed.operations.length ? 'Importé' : 'Saisie nécessaire', note: parsed.note
+        id: crypto.randomUUID(), name: storedName, source, driveId: file.id, hash, contentHash: fingerprint, statementMonth: parsed.statementMonth || '', createdBy: createdBy,
+        accountId:parsed.accountId||'',clientNumber:parsed.clientNumber||'',periodStart:parsed.periodStart||'',periodEnd:parsed.periodEnd||'',statementKind:parsed.statementKind||'',importReport:bankMerge?JSON.stringify(bankMerge.report):'',
+        importedAt: new Date().toISOString(), status: parsed.partial?'Import partiel':parsed.operations.length ? 'Importé' : bankSource(source)?'Contrôlé':'Saisie nécessaire', note: parsed.note
       };
-      const operations = parsed.operations.map(o => categorizeOperation({
+      const operations = (bankMerge?bankMerge.operations:parsed.operations).map(o => categorizeOperation({
         ...o, id: crypto.randomUUID(), documentId: document.id,
-        account: source, category: 'À catégoriser', type: o.type || 'expense', status: 'validated', createdBy: req.user?.email || ''
+        account: o.account||source, category: 'À catégoriser', type: o.type || 'expense', status: 'validated', createdBy: createdBy
       }, data.suppliers));
       await store.appendImport(document, operations);
-      return { document, count: operations.length, note: parsed.note };
-    });
-    res.status(result.duplicate ? 200 : 201).json(result);
+      return { document, count: operations.length, note: parsed.note+(bankMerge?` ${bankMerge.report.matched} opération(s) déjà présentes, ${bankMerge.report.added} ajoutée(s). ${bankMerge.report.unmatchedExisting} ligne(s) existante(s) absente(s) de l'annuel, conservée(s).`:''), bankReport:bankMerge?.report };
+
+  }
+  async function retainImport(buffer,values,error){
+    try{const item=await inbox.save(buffer,{...values,source:error.source||values.source},error);error.inboxId=item.id;}
+    catch(storageError){error.message+=' Zone tampon indisponible : '+storageError.message;}
+    return error;
+  }
+  app.get('/api/import-inbox',async(req,res)=>{
+    const items=await inbox.list();
+    if(req.query.summary==='1')return res.json({count:items.length});
+    for(const item of items)if(item.source==='PostFinance'&&!item.diagnostics?.source){
+      try{
+        const parsed=await extractPdf((await inbox.get(item.id)).buffer,'PostFinance');
+        item.ready=true;item.error='Le relevé est désormais lisible et ses totaux concordent. '+parsed.note+' Cliquez sur Réessayer pour l’importer.';
+      }catch(error){if(error.diagnostics){item.diagnostics=error.diagnostics;item.error=error.message;}}
+    }
+    for(const item of items)if(item.source==='UBS'&&!item.diagnostics?.rows){
+      try{
+        const parsed=await extractPdf((await inbox.get(item.id)).buffer,'UBS',{corrections:item.corrections||[]});
+        item.ready=item.diagnostics?.source==='UBS';
+        if(item.ready)item.error='Le PDF est désormais lisible et ses totaux concordent. Vous pouvez vérifier ou corriger les lignes ci-dessous, puis relancer l’import.';
+        item.diagnostics={source:'UBS',periodStart:parsed.periodStart,periodEnd:parsed.periodEnd,currency:parsed.currency,issues:[],rows:parsed.reviewRows,totals:{debit:{expected:parsed.debitTotal,actual:parsed.debitTotal},credit:{expected:parsed.creditTotal,actual:parsed.creditTotal}}};
+      }
+      catch(error){if(error.diagnostics){item.diagnostics=error.diagnostics;item.error=error.message;}}
+    }
+    res.json({items});
+  });
+  app.get('/api/import-inbox/:id/pdf',async(req,res)=>{const item=await inbox.get(req.params.id);res.set('Content-Disposition',"inline; filename*=UTF-8''"+encodeURIComponent(item.name)).type('application/pdf').send(item.buffer);});
+  app.delete('/api/import-inbox/:id',async(req,res)=>{await serialize(()=>inbox.remove(req.params.id));res.json({ok:true});});
+  app.post('/api/import-inbox/:id/retry',async(req,res)=>{
+    const result=await serialize(async()=>{
+      const item=await inbox.get(req.params.id),values={name:item.name,source:req.body?.source||item.source,createdBy:req.user?.email||item.createdBy||'',corrections:req.body?.corrections??item.corrections??[],allowPartial:req.body?.allowPartial===true};
+      if(!['Auto','UBS','PostFinance','Cembra','TopCard','Autre'].includes(values.source))throw Object.assign(new Error('Source inconnue.'),{status:400});
+      try{const result=await importDocument(item.buffer,values);await inbox.remove(item.id);return result;}
+      catch(error){throw await retainImport(item.buffer,values,error);}
+    });res.json(result);
+  });
+  app.post('/api/documents',express.raw({type:'application/pdf',limit:'15mb'}),async(req,res)=>{
+    if(!Buffer.isBuffer(req.body)||!req.body.subarray(0,1024).includes(Buffer.from('%PDF-')))return res.status(400).json({error:'Sélectionnez un PDF valide (15 Mo maximum).'});
+    const values={name:String(req.query.name||'document.pdf').replace(/[\\/\x00-\x1f]/g,'_').slice(0,180),source:String(req.query.source||'Auto'),createdBy:req.user?.email||''};
+    if(!['Auto','UBS','PostFinance','Cembra','TopCard','Autre'].includes(values.source))return res.status(400).json({error:'Source inconnue.'});
+    const result=await serialize(async()=>{
+      try{
+        const result=await importDocument(req.body,values);
+        const hash=crypto.createHash('sha256').update(req.body).digest('hex');
+        const item=(await inbox.list()).find(item=>item.hash===hash);if(item)await inbox.remove(item.id);
+        return result;
+      }catch(error){throw await retainImport(req.body,values,error);}
+    });res.status(result.duplicate?200:201).json(result);
   });
   app.post('/api/operations', async (req, res) => {
     const operation = validateOperation(req.body, categoryNames((await store.read()).categories));
@@ -165,15 +214,17 @@ function createApp(store = new GoogleStore(), config = runtimeConfig()) {
       const data = await store.read();
       const document = data.documents.find(d => d.id === req.params.id);
       if (!document) throw Object.assign(new Error('Document introuvable.'), { status: 404 });
-      if (!['Cembra', 'TopCard'].includes(document.source)) throw Object.assign(new Error('Relecture disponible pour Cembra et TopCard.'), { status: 400 });
+      if (!['Cembra', 'TopCard', 'UBS', 'PostFinance'].includes(document.source)) throw Object.assign(new Error('Relecture disponible pour Cembra, TopCard, UBS et PostFinance.'), { status: 400 });
       const buffer = await store.downloadPdf(document.driveId);
-      const parsed = await extractPdf(buffer, document.source);
-      if (!parsed.operations.length) throw Object.assign(new Error(parsed.note + ' Les opérations existantes sont conservées.'), { status: 422 });
-      const operations = parsed.operations.map(o => ({ ...o, id: crypto.randomUUID(), documentId: document.id,
-        account: document.source, category: 'À catégoriser', type: o.type, status: 'validated', createdBy: req.user?.email || '' }));
+      const parsed = await extractPdf(buffer, document.source, data);
+      if (!parsed.operations.length && !bankSource(document.source)) throw Object.assign(new Error(parsed.note + ' Les opérations existantes sont conservées.'), { status: 422 });
+      const bankMerge=bankSource(document.source)?mergeBankStatement(data.operations.filter(operation=>operation.documentId!==document.id),parsed):null;
+      const operations = (bankMerge?bankMerge.operations:parsed.operations).map(o => ({ ...o, id: crypto.randomUUID(), documentId: document.id,
+        account: o.account||document.source, category: 'À catégoriser', type: o.type, status: 'validated', createdBy: req.user?.email || '' }));
       const storedName = parsed.suggestedName || document.name;
       if (storedName !== document.name) await store.renamePdf(document.driveId, storedName);
-      await store.replaceImport({ ...document, name: storedName, contentHash: contentHash(document.source, parsed.operations), statementMonth: document.statementMonth || parsed.statementMonth || '', note: parsed.note, status: 'Importé' }, operations);
+      await store.replaceImport({ ...document, name: storedName, contentHash: contentHash(document.source, parsed.operations), statementMonth: document.statementMonth || parsed.statementMonth || '',
+        ...(bankMerge?{accountId:parsed.accountId,clientNumber:parsed.clientNumber,periodStart:parsed.periodStart,periodEnd:parsed.periodEnd,statementKind:parsed.statementKind,importReport:JSON.stringify(bankMerge.report)}:{}),note: parsed.note, status: 'Importé' }, operations);
       return { count: operations.length, note: parsed.note };
     });
     res.json(result);
@@ -221,6 +272,13 @@ function createApp(store = new GoogleStore(), config = runtimeConfig()) {
     res.status(201).json(await serialize(() => store.addCategory(req.body.name, req.body.parent)));
   });
   app.put('/api/categories', async (req, res) => res.json(await serialize(() => store.renameCategory(req.body.previous, req.body.name))));
+  app.post('/api/accounts',async(req,res)=>res.json(await serialize(()=>store.saveAccount(req.body))));
+  app.post('/api/holders',async(req,res)=>res.json(await serialize(()=>store.saveHolder(req.body))));
+  app.get('/api/reconciliation',async(req,res)=>{
+    const start=String(req.query.start||''),end=String(req.query.end||'');
+    if(!/^\d{4}-(0[1-9]|1[0-2])$/.test(start)||!/^\d{4}-(0[1-9]|1[0-2])$/.test(end)||start>end)return res.status(400).json({error:'Période de rapprochement invalide.'});
+    res.json(buildReconciliation(await store.read(),start,end));
+  });
   app.post('/api/categorize/preview', async (req, res) => res.json({ matches: await store.previewCategorization(req.body?.reclassify === true) }));
   app.post('/api/categorize/confirm', async (req, res) => res.json(await serialize(() => store.confirmCategorization(req.body.items, req.body.reclassify === true))));
   app.post('/api/categorize', async (req, res) => res.json(await serialize(() => store.categorizeOperations())));
@@ -229,7 +287,7 @@ function createApp(store = new GoogleStore(), config = runtimeConfig()) {
   } }));
   app.use((error, req, res, next) => {
     const status = error.type === 'entity.too.large' ? 413 : error.status || 500;
-    res.status(status).json({ error: status === 413 ? 'Le fichier dépasse la limite de 15 Mo.' : error.message || 'Une erreur est survenue.' });
+    res.status(status).json({ error: status === 413 ? 'Le fichier dépasse la limite de 15 Mo.' : error.message || 'Une erreur est survenue.', inboxId:error.inboxId,diagnostics:error.diagnostics });
   });
   return app;
 }

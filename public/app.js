@@ -1,6 +1,7 @@
 const $ = selector => document.querySelector(selector);
 const esc = value => String(value ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
 const money = (amount, currency = 'CHF') => new Intl.NumberFormat('fr-CH', { style: 'currency', currency }).format(amount);
+function importDate(value) { const date=new Date(value); return value&&Number.isFinite(date.getTime())?new Intl.DateTimeFormat('fr-CH',{dateStyle:'short',timeStyle:'short',timeZone:'Europe/Zurich'}).format(date):'date non renseignée'; }
 const today = () => new Date().toLocaleDateString('sv-SE');
 const state = { status: {}, data: { documents: [], operations: [], budgets: [], categories: [] }, view: 'dashboard', demo: false, editing: null, busy: false };
 const titles = { dashboard: ['Vue d’ensemble', 'Vos dépenses, avec un peu de recul.'], documents: ['Documents', 'Tous vos relevés, au même endroit.'], operations: ['Opérations', 'Le détail de votre quotidien.'], review: ['À catégoriser', 'Classez vos opérations à votre rythme, sans bloquer les totaux.'], budgets: ['Budgets', 'Donnez un cap aux dépenses de votre foyer.'], settings: ['Mon espace Google', 'Vos données et vos documents, chez vous.'] };
@@ -10,11 +11,16 @@ const typeLabels = { expense: 'Dépense', income: 'Revenu / remboursement', tran
 titles.suppliers = ['Fournisseurs et catégories', 'Le bon classement, automatiquement.'];
 titles.household = ['Mon foyer', 'Un espace commun, une connexion pour chacun.'];
 titles.preferences = ['Paramètres', 'Une interface à votre goût.'];
+titles.importerrors=['Imports en erreur','Retrouver et corriger les PDF en attente.'];
+titles.savings=['Épargne','Suivre les mouvements de vos comptes épargne.'];
+const accountName=id=>state.data.accounts?.find(account=>account.id===id)?.name||id;
+titles.reconciliation = ['Rapprochements', 'Contrôler les relevés, les paiements de carte et les virements.'];
 state.editingSupplier = null;
 $('#month').value = MyComptaPeriod.previousMonth();
 $('#coverage-end').value = MyComptaPeriod.previousMonth();
 $('#coverage-start').value = $('#coverage-end').value.slice(0, 4) + '-01';
 for (const id of ['coverage-source', 'coverage-start', 'coverage-end']) $('#' + id).onchange = renderCoverage;
+$('#coverage-account').onchange=renderCoverage;
 document.addEventListener('change', event => {
   const input = event.target.closest('[data-document-month]');
   if (!input || !input.value || !requireStorage()) return;
@@ -32,10 +38,16 @@ function renderCoverage() {
     return;
   }
   const source = $('#coverage-source').value, start = $('#coverage-start').value, end = $('#coverage-end').value;
+  const previousAccount=$('#coverage-account').value;
+  const accounts=[...new Set(state.data.documents.filter(document=>document.source===source&&document.accountId).map(document=>document.accountId))];
+  $('#coverage-account').innerHTML=accounts.map(account=>`<option value="${esc(account)}">${esc(accountName(account))}</option>`).join('');
+  if(accounts.includes(previousAccount))$('#coverage-account').value=previousAccount;
+  $('#coverage-account-label').hidden=!['UBS','PostFinance'].includes(source);
+  const relevantDocuments=state.data.documents.filter(document=>!['UBS','PostFinance'].includes(source)||!$('#coverage-account').value||document.accountId===$('#coverage-account').value);
   const span = (Number(end.slice(0, 4)) - Number(start.slice(0, 4))) * 12 + Number(end.slice(5)) - Number(start.slice(5));
   const valid = MyComptaDocumentMonths.valid(start) && MyComptaDocumentMonths.valid(end) && start <= end && span < 120;
-  const months = valid ? MyComptaDocumentMonths.coverage(state.data.documents, source, start, end) : [];
-  const unknown = state.data.documents.filter(document => document.source === source && !MyComptaDocumentMonths.month(document)).length;
+  const months = valid ? MyComptaDocumentMonths.coverage(relevantDocuments, source, start, end) : [];
+  const unknown = relevantDocuments.filter(document => document.source === source && document.statementKind!=='annual' && !MyComptaDocumentMonths.month(document)).length;
   $('#coverage-summary').textContent = valid ? `${months.filter(item => item.count > 0).length}/${months.length} mois présents · ${months.filter(item => !item.count).length} mois manquant(s) pour ${source}` : 'Choisissez une période valide de 10 ans maximum.';
   $('#coverage-grid').innerHTML = months.map(item => `<div class="coverage-month ${item.count ? 'present' : 'missing'}"><strong>${esc(new Intl.DateTimeFormat('fr-CH', { month: 'long', year: 'numeric' }).format(new Date(Number(item.month.slice(0, 4)), Number(item.month.slice(5)) - 1, 1)))}</strong><span>${item.count ? `✓ ${item.count} PDF` : 'Manquant'}</span></div>`).join('');
   $('#coverage-unknown').textContent = unknown ? `${unknown} PDF de ${source} sans mois identifié : renseignez leur mois ci-dessous avant de conclure qu’un relevé manque.` : 'Tous les documents de cet établissement ont un mois identifié.';
@@ -93,7 +105,7 @@ $('#supplier-category').innerHTML = options(categories.filter(c => c !== 'À cat
 async function api(url, options = {}) {
   const response = await fetch(url, { ...options, headers: { 'X-MyCompta': '1', ...options.headers } });
   const result = await response.json();
-  if (!response.ok) throw new Error(result.error || 'La requête a échoué.');
+  if (!response.ok) throw Object.assign(new Error(result.error || 'La requête a échoué.'),result);
   return result;
 }
 function message(text, error = false) {
@@ -121,12 +133,12 @@ function showView(view) {
   document.querySelectorAll('.nav').forEach(button => button.classList.toggle('active', button.dataset.view === view));
   $('#title').textContent = $('#breadcrumb').textContent = titles[view][0];
   $('#subtitle').textContent = titles[view][1];
-  $('#month-label').hidden = !['dashboard', 'operations', 'budgets'].includes(view);
+  $('#month-label').hidden = !['dashboard', 'operations', 'budgets','savings'].includes(view);
   $('#holder-label').hidden = !['operations', 'review'].includes(view);
   $('#operation-category-label').hidden = view !== 'operations';
   $('#period-mode').hidden = view === 'budgets';
   $('#month').hidden = view !== 'budgets' && $('#period-mode').value === 'year';
-  $('#period-status').hidden = !['dashboard', 'operations', 'budgets'].includes(view);
+  $('#period-status').hidden = !['dashboard', 'operations', 'budgets','savings'].includes(view);
   renderPeriodStatus();
   $('#import-shortcut').hidden = ['settings', 'documents', 'preferences', 'household'].includes(view);
   $('#onboarding').hidden = state.status.connected || state.demo || ['settings', 'preferences', 'household'].includes(view);
@@ -217,7 +229,7 @@ document.addEventListener('click', event => {
     $('#search').value = '';
     renderOperations();
   }
-  if (nav) { showView(nav.dataset.view); if (nav.dataset.view === 'household') action(loadHousehold); }
+  if (nav) { showView(nav.dataset.view); if (nav.dataset.view === 'household') action(loadHousehold); if(nav.dataset.view==='reconciliation')action(()=>MyComptaBank.load()); if(nav.dataset.view==='importerrors')action(()=>MyComptaWorkflows.loadInbox()); }
   const edit = event.target.closest('[data-edit]');
   const removeMember = event.target.closest('[data-remove-member]');
   if (removeMember && window.confirm('Retirer cette personne du foyer et bloquer ses sessions ?')) action(async () => {
@@ -242,7 +254,7 @@ document.addEventListener('click', event => {
     await load();
     message(`Document renommé : ${result.name}`);
   });
-  if (reanalyse && requireStorage() && window.confirm('Relire le détail du relevé ? Les lignes du document seront remplacées par la nouvelle extraction. Les catégories et exclusions seront conservées pour les opérations retrouvées ; les lignes sans correspondance seront remplacées.')) action(async () => {
+  if (reanalyse && requireStorage() && window.confirm('Relire le détail du relevé ? Les lignes du document seront remplacées par la nouvelle extraction. Les catégories et exclusions seront conservées pour les opérations retrouvées ; les lignes sans correspondance seront remplacées. Pour UBS et PostFinance, les types dépense / revenu / virement seront recalculés.')) action(async () => {
     message('Relecture du détail Cembra depuis le PDF archivé…');
     const result = await api('/api/documents/' + encodeURIComponent(reanalyse.dataset.reanalyse) + '/reanalyse', { method: 'POST' });
     await load();
@@ -279,22 +291,32 @@ function docRows(documents, compact = false) {
   if (!documents.length) return empty('Votre bibliothèque commence ici', 'Importez votre premier relevé PDF.');
   return [...documents].reverse().map(d => {
     const url = state.demo ? null : pdfUrl(d);
-    const reanalyse = !compact && !state.demo && ['Cembra', 'TopCard'].includes(d.source)
+    const reanalyse = !compact && !state.demo && ['Cembra', 'TopCard','UBS','PostFinance'].includes(d.source)
       ? `<p><button class="text-button" data-reanalyse="${esc(d.id)}">Relire le détail ${esc(d.source)}</button></p>${d.source === 'Cembra' ? `<p><button class="text-button" data-rename="${esc(d.id)}">Renommer avec la date de facture</button></p>` : ''}` : '';
     const operations = state.data.operations.filter(o => o.documentId === d.id);
     const pending = operations.filter(o => o.status !== 'ignored' && o.category === 'À catégoriser').length;
-    const status = operations.length ? (pending ? `${pending} à catégoriser` : 'Traité') : 'Saisie nécessaire';
-    return `<div class="document-row"><span class="pdf-icon">PDF</span><div class="document-info"><strong>${url ? `<a href="${esc(url)}" target="_blank" rel="noopener noreferrer">${esc(d.name)} ↗</a>` : esc(d.name)}</strong><small>${esc(d.source)} · ${esc(new Date(d.importedAt).toLocaleDateString('fr-CH'))} · ${operations.length} opération(s)${d.createdBy ? " · Ajouté par " + esc(d.createdBy) : ""}</small>${!compact && d.note ? `<p>${esc(d.note)}</p>` : ''}${reanalyse}${!compact ? `<label class="document-month-label">Mois du relevé<input type="month" data-document-month="${esc(d.id)}" value="${esc(MyComptaDocumentMonths.month(d))}" aria-label="Mois du relevé ${esc(d.name)}"></label>` : ''}</div><span class="badge ${pending ? '' : operations.length ? 'validated' : ''}">${esc(status)}</span></div>`;
+    const status = d.status==='Import partiel'?'Import partiel':operations.length ? (pending ? `${pending} à catégoriser` : 'Traité') : ['UBS','PostFinance'].includes(d.source)&&d.importReport?'Contrôlé / opérations déjà présentes':'Saisie nécessaire';
+    return `<div class="document-row"><span class="pdf-icon">PDF</span><div class="document-info"><strong>${url ? `<a href="${esc(url)}" target="_blank" rel="noopener noreferrer">${esc(d.name)} ↗</a>` : esc(d.name)}</strong><small>${esc(d.source)} · Importé le ${esc(importDate(d.importedAt))} · ${operations.length} opération(s)${d.createdBy ? " · Ajouté par " + esc(d.createdBy) : ""}</small>${!compact && d.note ? `<p>${esc(d.note)}</p>` : ''}${reanalyse}${!compact && d.statementKind !== "annual" ? `<label class="document-month-label">Mois du relevé<input type="month" data-document-month="${esc(d.id)}" value="${esc(MyComptaDocumentMonths.month(d))}" aria-label="Mois du relevé ${esc(d.name)}"></label>` : ''}</div><span class="badge ${pending ? '' : operations.length ? 'validated' : ''}">${esc(status)}</span></div>`;
   }).join('');
 }
 function operationTable(operations, quickCategory = false) {
   if (!operations.length) return empty('Aucune opération à afficher', 'Les lignes importées apparaîtront ici.');
-  return `<table><thead><tr><th>Date</th><th>Libellé / compte</th><th>Titulaire</th><th>Catégorie</th><th>État</th><th>Ajouté par</th><th class="amount">Montant</th><th></th></tr></thead><tbody>${operations.map(o => `<tr data-operation-id="${esc(o.id)}"><td>${esc(o.date.split('-').reverse().join('.'))}</td><td class="label-cell" title="${esc(o.label)}">${esc(o.label)}<span class="subtext">${esc(o.account)} · ${esc(typeLabels[o.type] || o.type)}</span></td><td>${esc(o.holder || "Non renseigné")}<span class="subtext">${esc(o.cardLast4 ? "Carte " + o.cardLast4 : "")}</span></td><td>${esc(o.category)}</td><td><span class="badge ${esc(o.status)}">${esc(o.status !== "ignored" && o.category === "À catégoriser" ? "À catégoriser" : labels[o.status] || o.status)}</span></td><td>${esc(o.createdBy || "—")}</td><td class="amount">${esc(money(o.amount, o.currency))}</td><td>${quickCategory && ['expense', 'income'].includes(o.type) ? `<button type="button" class="secondary" data-quick-category="${esc(o.id)}">Catégoriser</button>` : ''}<button class="text-button" data-edit="${esc(o.id)}">Modifier →</button></td></tr>`).join('')}</tbody></table>`;
+  return `<table class="operation-table"><thead><tr><th>Date</th><th class="amount">Montant</th><th>Libellé / compte</th><th class="holder-cell">Titulaire</th><th>Catégorie</th><th>État</th><th>Ajouté par</th><th></th></tr></thead><tbody>${operations.map(o => `<tr data-operation-id="${esc(o.id)}"><td>${esc(o.date.split('-').reverse().join('.'))}</td><td class="amount">${esc(money(o.amount, o.currency))}</td><td class="label-cell" title="${esc(o.label)}">${esc(o.label)}<span class="subtext">${esc(accountName(o.account))} · ${esc(typeLabels[o.type] || o.type)}</span></td><td class="holder-cell" title="${esc(o.holder || "Non renseigné")}">${MyComptaHolders.badge(o.holder)}<span class="subtext">${esc(o.cardLast4 ? "Carte " + o.cardLast4 : "")}</span></td><td>${esc(o.category)}</td><td><span class="badge ${esc(o.status)}">${esc(o.status !== "ignored" && o.category === "À catégoriser" ? "À catégoriser" : labels[o.status] || o.status)}</span></td><td>${esc(o.createdBy || "—")}</td><td>${quickCategory && ['expense', 'income'].includes(o.type) ? `<button type="button" class="secondary" data-quick-category="${esc(o.id)}">Catégoriser</button>` : ''}<button class="text-button" data-edit="${esc(o.id)}">Modifier →</button></td></tr>`).join('')}</tbody></table>`;
 }
+const operationList=$('#operations-list'),operationScrollbar=$('#operations-scrollbar');
+function updateOperationScrollbar(){
+  const overflow=operationList.clientWidth>0&&operationList.scrollWidth>operationList.clientWidth;
+  operationScrollbar.hidden=!overflow;
+  operationScrollbar.firstElementChild.style.width=operationList.scrollWidth+'px';
+  operationScrollbar.scrollLeft=operationList.scrollLeft;
+}
+operationScrollbar.onscroll=()=>{operationList.scrollLeft=operationScrollbar.scrollLeft;};
+operationList.onscroll=()=>{operationScrollbar.scrollLeft=operationList.scrollLeft;};
+new ResizeObserver(updateOperationScrollbar).observe(operationList);
 function renderOperations() {
   const month = selectedPeriod();
   const search = $('#search').value.toLocaleLowerCase('fr');
-  const allForPeriod = state.data.operations.filter(o => MyComptaPeriod.matches(o.date, month)).sort((a, b) => b.date.localeCompare(a.date));
+  const allForPeriod = state.data.operations.filter(o => !o.isSavings && MyComptaPeriod.matches(o.date, month)).sort((a, b) => b.date.localeCompare(a.date));
   const filtered = allForPeriod.filter(matchesHolder);
   const selection = state.categoryFilter;
   $('#operation-category-filter').value = selection?.category || '';
@@ -305,11 +327,12 @@ function renderOperations() {
   $('#operations-list').innerHTML = operationTable(visible);
   const totals = MyComptaOperationTotals.calculate(visible);
   $('#operations-totals').innerHTML = `<strong>${visible.length} opération(s) affichée(s)</strong><div class="operation-total-values">${totals.length ? totals.map(total => `<div><span>Dépenses : <strong>${esc(money(total.expenses, total.currency))}</strong></span>${total.income ? `<span>Revenus / remboursements : ${esc(money(total.income, total.currency))}</span><span>Solde dépenses − revenus : <strong>${esc(money(total.net, total.currency))}</strong></span>` : ''}</div>`).join('') : '<span>Aucun montant à totaliser.</span>'}</div><small>Hors opérations ignorées, virements et règlements de carte. Totaux selon les filtres affichés.</small>`;
+  updateOperationScrollbar();
   $('#recent-operations').innerHTML = operationTable(allForPeriod.slice(0, 5));
-  $('#review-list').innerHTML = operationTable(state.data.operations.filter(o => matchesHolder(o) && o.status !== 'ignored' && o.category === 'À catégoriser'), true);
+  $('#review-list').innerHTML = operationTable(state.data.operations.filter(o => !o.isSavings && matchesHolder(o) && o.status !== 'ignored' && o.category === 'À catégoriser'), true);
 }
 function summary() {
-  const expense = state.data.operations.filter(o => MyComptaPeriod.matches(o.date, selectedPeriod()) && o.status !== 'ignored' && o.type === 'expense');
+  const expense = state.data.operations.filter(o => !o.isSavings && MyComptaPeriod.matches(o.date, selectedPeriod()) && o.status !== 'ignored' && o.type === 'expense');
   const totals = {}, groups = {};
   expense.forEach(o => {
     totals[o.currency] = (totals[o.currency] || 0) + Math.round(o.amount * 100);
@@ -319,6 +342,9 @@ function summary() {
   return { expense, totals, groups };
 }
 function render() {
+  MyComptaHolders.render(state.data);
+  MyComptaBank.render(state.data);
+  MyComptaWorkflows.renderSavings();
   const previousHolder = $('#holder-filter').value;
   const holders = [...new Set(state.data.operations.map(o => holderKey(o.holder)).filter(Boolean))].sort((a, b) => a.localeCompare(b, 'fr'));
   $('#holder-filter').innerHTML = '<option value="">Tous les titulaires</option>' + holders.map(holder => `<option value="${esc('holder:' + holder)}">${esc(holder)}</option>`).join('') + '<option value="unknown">Non renseigné</option>';
@@ -343,7 +369,7 @@ function render() {
   $('#operations-period-title').textContent = annual ? 'Toutes les opérations de l’année' : 'Toutes les opérations du mois';
   renderSuppliers();
   const { expense, totals, groups } = summary();
-  const pending = state.data.operations.filter(o => o.status !== 'ignored' && o.category === 'À catégoriser').length;
+  const pending = state.data.operations.filter(o => !o.isSavings && o.status !== 'ignored' && o.category === 'À catégoriser').length;
   $('#total').textContent = Object.entries(totals).map(([currency, amount]) => money(amount / 100, currency)).join('\n') || money(0);
   $('#count').textContent = expense.length;
   $('#pending').textContent = $('#nav-count').textContent = pending;
@@ -358,7 +384,7 @@ function render() {
   renderOperations();
   const budgets = state.data.budgets.filter(b => b.month === $('#month').value);
   $('#budget-list').innerHTML = budgets.map(b => {
-    const spent = state.data.operations.filter(o => MyComptaPeriod.matches(o.date, b.month) && o.status !== 'ignored' && o.type === 'expense' && categoryBelongsTo(o.category, b.category) && o.currency === 'CHF').reduce((sum, o) => sum + Math.round(o.amount * 100), 0) / 100;
+    const spent = state.data.operations.filter(o => !o.isSavings && MyComptaPeriod.matches(o.date, b.month) && o.status !== 'ignored' && o.type === 'expense' && categoryBelongsTo(o.category, b.category) && o.currency === 'CHF').reduce((sum, o) => sum + Math.round(o.amount * 100), 0) / 100;
     return `<div class="budget-row"><div><strong>${esc(b.category)}</strong><span>${esc(money(spent))} / ${esc(money(b.amount))}</span></div><progress value="${Math.min(spent, b.amount)}" max="${Math.max(b.amount, 1)}" aria-label="Budget ${esc(b.category)}"></progress><small>${spent > b.amount ? 'Dépassement de ' + esc(money(spent - b.amount)) : 'Reste disponible : ' + esc(money(b.amount - spent))}</small></div>`;
   }).join('') || empty('À chaque catégorie, son budget', 'Ajoutez une enveloppe mensuelle pour commencer.');
   const s = state.status;
@@ -386,10 +412,13 @@ function render() {
 async function load() {
   if (state.demo) { render(); return; }
   state.status = await api('/api/status');
+  await MyComptaWorkflows.refreshInboxCount();
   if (state.status.connected && state.status.ready && (!state.status.multiUser || state.status.driveConnected)) state.data = await api('/api/data');
   else state.data = { documents: [], operations: [], budgets: [], categories: [] };
   render();
   if (state.view === 'household') await loadHousehold();
+  if(state.view==='reconciliation')await MyComptaBank.load();
+  if(state.view==='importerrors')await MyComptaWorkflows.loadInbox();
 }
 function requireStorage() {
   if (state.demo) { message('L’exemple est en lecture seule. Quittez-le et connectez Google pour enregistrer vos données.'); return false; }
@@ -412,7 +441,7 @@ $('#disconnect').onclick = () => action(async () => { await api('/api/disconnect
 $('#upload-form').onsubmit = event => {
   event.preventDefault();
   if (!requireStorage()) return;
-  const form = event.target, files = Array.from(form.pdf.files), source = form.source.value;
+  const form = event.target, files = Array.from(MyComptaWorkflows.files(form.pdf)), source = form.source.value;
   if (!files.length) return message('Choisissez au moins un PDF.', true);
   action(async () => {
     const results = await MyComptaImports.run(files, source,
@@ -422,7 +451,8 @@ $('#upload-form').onsubmit = event => {
         $('#import-results').innerHTML = results.map(item => '<p class="banner' + (item.error ? ' import-error' : '') + '"><strong>' + esc(item.name) + '</strong><br>' + esc(item.error || (item.response.duplicate ? 'Relevé déjà importé (fichier ou données identiques) : aucun ajout.' : item.response.count + ' opération(s) importée(s). ' + (item.response.note || ''))) + '</p>').join('');
       });
     const failed = results.filter(item => item.error).length;
-    if (!failed) form.reset();
+    if (!failed) {form.reset();MyComptaWorkflows.clearFiles();}
+    if(failed)$('#import-results').insertAdjacentHTML('beforeend','<button class="secondary" data-view="importerrors">Voir les PDF en erreur et leurs diagnostics</button>');
     try { await load(); } catch (error) { message('Imports terminés. Actualisation impossible : ' + error.message, true); return; }
     message((files.length - failed) + '/' + files.length + ' fichier(s) traité(s). Consultez les résultats ci-dessous.', failed > 0);
   });

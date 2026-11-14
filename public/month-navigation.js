@@ -1,8 +1,8 @@
 // Navigation changes display periods only, never stored statement metadata.
-document.querySelectorAll('#month, #coverage-start, #coverage-end').forEach(input => {
+document.querySelectorAll('#month, #coverage-start, #coverage-end, #reconciliation-start, #reconciliation-end').forEach(input => {
   const group = document.createElement('span');
   group.className = 'month-stepper';
-  const label = input.getAttribute('aria-label') || (input.id === 'coverage-start' ? 'Depuis' : 'Jusqu’à');
+  const label = input.getAttribute('aria-label') || (input.id.endsWith('start') ? 'Depuis' : 'Jusqu’à');
   input.before(group);
   for (const offset of [-1, 1]) {
     const button = document.createElement('button');
