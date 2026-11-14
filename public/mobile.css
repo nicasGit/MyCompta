@@ -141,3 +141,21 @@
 .category-remember { display:flex; align-items:center; gap:10px; margin:16px 0; }
 .category-remember input { width:20px; height:20px; flex-shrink:0; }
 #category-rule-settings[hidden] { display:none; }
+@media (max-width:720px) {
+  #review-list { overflow:visible; }
+  #review-list .operation-table,
+  #review-list .operation-table tbody { display:block; width:100%; min-width:0; white-space:normal; }
+  #review-list .operation-table thead { display:none; }
+  #review-list .operation-table tr { display:grid; grid-template-columns:minmax(0,1fr) minmax(0,1fr); gap:10px 12px; padding:16px 0; border-bottom:1px solid var(--border); }
+  #review-list .operation-table td { display:block; width:auto; min-width:0; max-width:none; border:0; padding:0; white-space:normal; overflow-wrap:anywhere; }
+  #review-list .operation-table td.label-cell { grid-column:1/-1; overflow:visible; text-overflow:clip; font-size:14px; line-height:1.5; }
+  #review-list .operation-table td:nth-child(1) { align-self:center; }
+  #review-list .operation-table td.amount { white-space:nowrap; font-size:16px; }
+  #review-list .operation-table td:nth-child(4)::before { content:'Titulaire'; }
+  #review-list .operation-table td:nth-child(5)::before { content:'Catégorie'; }
+  #review-list .operation-table td:nth-child(6)::before { content:'État'; }
+  #review-list .operation-table td:nth-child(7)::before { content:'Ajouté par'; }
+  #review-list .operation-table td:nth-child(n+4):nth-child(-n+7)::before { display:block; color:var(--muted); font-size:10px; margin-bottom:5px; }
+  #review-list .operation-table td.category-action { grid-column:1/-1; position:static; background:transparent; box-shadow:none; }
+  #review-list [data-quick-category] { width:100%; min-height:44px; margin:4px 0 0; }
+}
