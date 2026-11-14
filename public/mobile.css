@@ -137,3 +137,4 @@
 .holder-profile-choice span { font-size:21px; vertical-align:middle; }
 #holder-profile-form select[name="icon"] { font-size:24px; min-width:80px; }
 .holder-profile-choice { max-width:100%; white-space:normal; overflow-wrap:anywhere; text-align:left; }
+.operation-table .category-action { position:sticky; right:0; background:var(--paper,#fff); box-shadow:-4px 0 7px rgba(35,65,105,.08); } #review-list [data-quick-category] { margin-right:0; }

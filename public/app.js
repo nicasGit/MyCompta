@@ -144,7 +144,7 @@ function showView(view) {
   $('#onboarding').hidden = state.status.connected || state.demo || ['settings', 'preferences', 'household'].includes(view);
 }
 function openCategoryMenu(id) {
-  if (state.busy || !requireStorage()) return;
+  if (!requireStorage()) return;
   const operation = state.data.operations.find(item => item.id === id);
   if (!operation || !['expense', 'income'].includes(operation.type)) return;
   const dialog = $('#category-menu');
@@ -153,11 +153,13 @@ function openCategoryMenu(id) {
   $('#category-rule-filter').value = operation.label.slice(0, 120);
   $('#category-rule-error').hidden = true;
   $('#category-menu-options').innerHTML = categories.filter(category => category !== 'À catégoriser').map(category => `<button type="button" class="secondary" data-assign-category="${esc(category)}">${esc(category)}</button>`).join('');
-  dialog.showModal();
+  if(!dialog.open)dialog.showModal();
 }
-$('#review-list').addEventListener('contextmenu', event => {
+for(const target of ['#review-list','#operations-list'])$(target).addEventListener('contextmenu', event => {
   const row = event.target.closest('[data-operation-id]');
   if (!row) return;
+  const operation=state.data.operations.find(item=>item.id===row.dataset.operationId);
+  if(!operation||!['expense','income'].includes(operation.type))return;
   event.preventDefault();
   openCategoryMenu(row.dataset.operationId);
 });
@@ -200,7 +202,12 @@ document.addEventListener('click', event => {
   const quickCategory = event.target.closest('[data-quick-category]');
   if (quickCategory) openCategoryMenu(quickCategory.dataset.quickCategory);
   const assign = event.target.closest('[data-assign-category]');
-  if (assign && !state.busy) {
+  if (assign && state.busy) {
+    $('#category-rule-error').textContent = 'Actualisation en cours, veuillez réessayer dans un instant.';
+    $('#category-rule-error').hidden = false;
+    return;
+  }
+  if (assign) {
     const id = $('#category-menu').dataset.operationId, category = assign.dataset.assignCategory;
     const filter = $('#category-rule-filter').value.trim();
     if (!$('#category-rule-filter').reportValidity()) return;
@@ -294,14 +301,14 @@ function docRows(documents, compact = false) {
     const reanalyse = !compact && !state.demo && ['Cembra', 'TopCard','UBS','PostFinance'].includes(d.source)
       ? `<p><button class="text-button" data-reanalyse="${esc(d.id)}">Relire le détail ${esc(d.source)}</button></p>${d.source === 'Cembra' ? `<p><button class="text-button" data-rename="${esc(d.id)}">Renommer avec la date de facture</button></p>` : ''}` : '';
     const operations = state.data.operations.filter(o => o.documentId === d.id);
-    const pending = operations.filter(o => o.status !== 'ignored' && o.category === 'À catégoriser').length;
+    const pending = operations.filter(o => !o.isSavings && ['expense','income'].includes(o.type) && o.status !== 'ignored' && o.category === 'À catégoriser').length;
     const status = d.status==='Import partiel'?'Import partiel':operations.length ? (pending ? `${pending} à catégoriser` : 'Traité') : ['UBS','PostFinance'].includes(d.source)&&d.importReport?'Contrôlé / opérations déjà présentes':'Saisie nécessaire';
     return `<div class="document-row"><span class="pdf-icon">PDF</span><div class="document-info"><strong>${url ? `<a href="${esc(url)}" target="_blank" rel="noopener noreferrer">${esc(d.name)} ↗</a>` : esc(d.name)}</strong><small>${esc(d.source)} · Importé le ${esc(importDate(d.importedAt))} · ${operations.length} opération(s)${d.createdBy ? " · Ajouté par " + esc(d.createdBy) : ""}</small>${!compact && d.note ? `<p>${esc(d.note)}</p>` : ''}${reanalyse}${!compact && d.statementKind !== "annual" ? `<label class="document-month-label">Mois du relevé<input type="month" data-document-month="${esc(d.id)}" value="${esc(MyComptaDocumentMonths.month(d))}" aria-label="Mois du relevé ${esc(d.name)}"></label>` : ''}</div><span class="badge ${pending ? '' : operations.length ? 'validated' : ''}">${esc(status)}</span></div>`;
   }).join('');
 }
 function operationTable(operations, quickCategory = false) {
   if (!operations.length) return empty('Aucune opération à afficher', 'Les lignes importées apparaîtront ici.');
-  return `<table class="operation-table"><thead><tr><th>Date</th><th class="amount">Montant</th><th>Libellé / compte</th><th class="holder-cell">Titulaire</th><th>Catégorie</th><th>État</th><th>Ajouté par</th><th></th></tr></thead><tbody>${operations.map(o => `<tr data-operation-id="${esc(o.id)}"><td>${esc(o.date.split('-').reverse().join('.'))}</td><td class="amount">${esc(money(o.amount, o.currency))}</td><td class="label-cell" title="${esc(o.label)}">${esc(o.label)}<span class="subtext">${esc(accountName(o.account))} · ${esc(typeLabels[o.type] || o.type)}</span></td><td class="holder-cell" title="${esc(o.holder || "Non renseigné")}">${MyComptaHolders.badge(o.holder)}<span class="subtext">${esc(o.cardLast4 ? "Carte " + o.cardLast4 : "")}</span></td><td>${esc(o.category)}</td><td><span class="badge ${esc(o.status)}">${esc(o.status !== "ignored" && o.category === "À catégoriser" ? "À catégoriser" : labels[o.status] || o.status)}</span></td><td>${esc(o.createdBy || "—")}</td><td>${quickCategory && ['expense', 'income'].includes(o.type) ? `<button type="button" class="secondary" data-quick-category="${esc(o.id)}">Catégoriser</button>` : ''}<button class="text-button" data-edit="${esc(o.id)}">Modifier →</button></td></tr>`).join('')}</tbody></table>`;
+  return `<table class="operation-table"><thead><tr><th>Date</th><th class="amount">Montant</th><th>Libellé / compte</th><th class="holder-cell">Titulaire</th><th>Catégorie</th><th>État</th><th>Ajouté par</th><th class="${quickCategory?'category-action':''}"></th></tr></thead><tbody>${operations.map(o => `<tr data-operation-id="${esc(o.id)}"><td>${esc(o.date.split('-').reverse().join('.'))}</td><td class="amount">${esc(money(o.amount, o.currency))}</td><td class="label-cell" title="${esc(o.label)}">${esc(o.label)}<span class="subtext">${esc(accountName(o.account))} · ${esc(typeLabels[o.type] || o.type)}</span></td><td class="holder-cell" title="${esc(o.holder || "Non renseigné")}">${MyComptaHolders.badge(o.holder)}<span class="subtext">${esc(o.cardLast4 ? "Carte " + o.cardLast4 : "")}</span></td><td>${esc(o.category)}</td><td><span class="badge ${esc(o.status)}">${esc(o.status !== "ignored" && o.category === "À catégoriser" ? "À catégoriser" : labels[o.status] || o.status)}</span></td><td>${esc(o.createdBy || "—")}</td><td class="${quickCategory?'category-action':''}">${quickCategory ? `<button type="button" class="primary" data-quick-category="${esc(o.id)}">Catégoriser</button>` : `<button class="text-button" data-edit="${esc(o.id)}">Modifier →</button>`}</td></tr>`).join('')}</tbody></table>`;
 }
 const operationList=$('#operations-list'),operationScrollbar=$('#operations-scrollbar');
 function updateOperationScrollbar(){
@@ -329,7 +336,7 @@ function renderOperations() {
   $('#operations-totals').innerHTML = `<strong>${visible.length} opération(s) affichée(s)</strong><div class="operation-total-values">${totals.length ? totals.map(total => `<div><span>Dépenses : <strong>${esc(money(total.expenses, total.currency))}</strong></span>${total.income ? `<span>Revenus / remboursements : ${esc(money(total.income, total.currency))}</span><span>Solde dépenses − revenus : <strong>${esc(money(total.net, total.currency))}</strong></span>` : ''}</div>`).join('') : '<span>Aucun montant à totaliser.</span>'}</div><small>Hors opérations ignorées, virements et règlements de carte. Totaux selon les filtres affichés.</small>`;
   updateOperationScrollbar();
   $('#recent-operations').innerHTML = operationTable(allForPeriod.slice(0, 5));
-  $('#review-list').innerHTML = operationTable(state.data.operations.filter(o => !o.isSavings && matchesHolder(o) && o.status !== 'ignored' && o.category === 'À catégoriser'), true);
+  $('#review-list').innerHTML = operationTable(state.data.operations.filter(o => !o.isSavings && ['expense','income'].includes(o.type) && matchesHolder(o) && o.status !== 'ignored' && o.category === 'À catégoriser'), true);
 }
 function summary() {
   const expense = state.data.operations.filter(o => !o.isSavings && MyComptaPeriod.matches(o.date, selectedPeriod()) && o.status !== 'ignored' && o.type === 'expense');
@@ -369,7 +376,7 @@ function render() {
   $('#operations-period-title').textContent = annual ? 'Toutes les opérations de l’année' : 'Toutes les opérations du mois';
   renderSuppliers();
   const { expense, totals, groups } = summary();
-  const pending = state.data.operations.filter(o => !o.isSavings && o.status !== 'ignored' && o.category === 'À catégoriser').length;
+  const pending = state.data.operations.filter(o => !o.isSavings && ['expense','income'].includes(o.type) && o.status !== 'ignored' && o.category === 'À catégoriser').length;
   $('#total').textContent = Object.entries(totals).map(([currency, amount]) => money(amount / 100, currency)).join('\n') || money(0);
   $('#count').textContent = expense.length;
   $('#pending').textContent = $('#nav-count').textContent = pending;
