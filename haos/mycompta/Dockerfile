@@ -1,12 +1,13 @@
 FROM node:24-bookworm-slim AS source
 RUN apt-get update && apt-get install -y --no-install-recommends git ca-certificates && rm -rf /var/lib/apt/lists/*
 WORKDIR /src
-# Refresh the source cache when main changes, then fetch that exact commit.
-ADD https://api.github.com/repos/nicasGit/MyCompta/commits/main /tmp/mycompta-version.json
+# Pin the application release without depending on the GitHub API.
+ARG MYCOMPTA_COMMIT=510155a5267f040066eb461f9d98c498763f35dd
 RUN git init . && git remote add origin https://github.com/nicasGit/MyCompta.git \
-    && git fetch --depth 1 origin "$(node -p "require('/tmp/mycompta-version.json').sha")" \
-    && git checkout --detach FETCH_HEAD \
-    && npm ci --omit=dev && npm cache clean --force
+    && git fetch --depth 1 origin "${MYCOMPTA_COMMIT}" \
+    && git checkout --detach FETCH_HEAD
+
+RUN npm ci --omit=dev && npm cache clean --force
 
 FROM node:24-bookworm-slim
 WORKDIR /app
