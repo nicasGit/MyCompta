@@ -31,18 +31,39 @@ class TransferLinks {
     await fs.writeFile(temporary, JSON.stringify(links), { mode: 0o600 });
     await fs.rename(temporary, file);
   }
-  async link(scope, operations, debitId, creditId) {
+  async link(scope, operations, debitId, creditId, automatic = false) {
     validatePair(operations, debitId, creditId);
-    const links = await this.read(scope);
+    let links = await this.read(scope);
     const existing = links.find(item => item.debitId === debitId && item.creditId === creditId);
-    if (existing) return existing;
-    if (links.some(item => [item.debitId, item.creditId].some(id => id === debitId || id === creditId))) {
+    if (existing && (!existing.blocked || automatic)) return existing;
+    links = links.filter(item => item !== existing);
+    if (links.some(item => !item.blocked && [item.debitId, item.creditId].some(id => id === debitId || id === creditId))) {
       throw fail('Une de ces opérations est déjà liée. Dissociez-la avant de changer le lien.');
     }
-    const item = { id: crypto.randomUUID(), debitId, creditId, createdAt: new Date().toISOString() };
+    const item = { id: crypto.randomUUID(), debitId, creditId, automatic, createdAt: new Date().toISOString() };
     await this.write(scope, [...links, item]);
     return item;
   }
-  async unlink(scope, id) { await this.write(scope, (await this.read(scope)).filter(item => item.id !== id)); }
+  async unlink(scope, id) {
+    const links = await this.read(scope);
+    await this.write(scope, links.flatMap(item => item.id !== id ? [item] : item.automatic ? [{ ...item, blocked: true }] : []));
+  }
+  async autoLink(scope, data) {
+    const links = await this.read(scope);
+    const { pairs } = require('./bank-reconciliation').buildReconciliation({ ...data, transferLinks:links }, '0000-01', '9999-12');
+    let count = 0;
+    for (const pair of pairs) {
+      const source = (data.accounts || []).find(account => account.id === pair.debit.account);
+      const target = (data.accounts || []).find(account => account.id === pair.credit.account);
+      const name = String(target?.name || '').trim().replace(/\s+/g,' ').toLocaleLowerCase('fr');
+      const fromPostFinance = source?.source === 'PostFinance' || /^PostFinance\b/i.test(pair.debit.account);
+      if (!fromPostFinance || !['courant nico','commun'].includes(name) || Math.round(pair.debit.amount*100)%100 !== 0) continue;
+      const existing = links.find(link => link.debitId === pair.debit.id && link.creditId === pair.credit.id);
+      if (existing) continue;
+      await this.link(scope,data.operations,pair.debit.id,pair.credit.id,true);
+      count++;
+    }
+    return { linked:count };
+  }
 }
 module.exports = { TransferLinks, validatePair };

@@ -4,6 +4,7 @@ function buildReconciliation(data,start,end){
   const included=date=>date&&date.slice(0,7)>=start&&date.slice(0,7)<=end;
   const linked = [];
   for (const link of data.transferLinks || []) {
+    if (link.blocked) continue;
     try { const pair=require('./transfer-links').validatePair(all,link.debitId,link.creditId); linked.push({...link,...pair}); } catch {}
   }
   const linkedIds = new Set(linked.flatMap(pair=>[pair.debit.id,pair.credit.id]));

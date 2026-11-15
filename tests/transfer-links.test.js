@@ -54,3 +54,24 @@ test('transfer API saves, lists and removes links with normal mutation protectio
  const after=await (await fetch(base+'/api/reconciliation?start=2026-10&end=2026-11')).json();
  assert.equal(after.linked.length,0);assert.equal(after.pairs.length,1);
 });
+
+test('automatic links only match whole-amount PostFinance transfers to named accounts and respect unlinking',async()=>{
+ const store=new TransferLinks(null),scope='auto';
+ const accounts=[{id:'UBS',source:'PostFinance'},{id:'PostFinance',name:'Courant Nico'}];
+ const data={operations:[debit,credit],accounts};
+ assert.equal((await store.autoLink(scope,data)).linked,1);
+ const links=await store.read(scope);assert.equal(links[0].automatic,true);
+ assert.equal((await store.autoLink(scope,data)).linked,0);
+ await store.unlink(scope,links[0].id);
+ assert.equal((await store.autoLink(scope,data)).linked,0);
+ assert.equal(buildReconciliation({...data,transferLinks:await store.read(scope)},'2026-10','2026-11').pairs.length,1);
+ await store.link(scope,data.operations,'out','in');
+ assert.equal((await store.read(scope)).filter(item=>!item.blocked).length,1);
+ for(const name of ['Commun','Courant Nico']){
+  assert.equal((await store.autoLink('name-'+name,{...data,accounts:[accounts[0],{id:'PostFinance',name}]})).linked,1);
+ }
+ assert.equal((await store.autoLink('other',{...data,accounts:[accounts[0],{id:'PostFinance',name:'Vacances'}]})).linked,0);
+ assert.equal((await store.autoLink('fraction',{...data,operations:[{...debit,amount:100.50},{...credit,amount:100.50}]})).linked,0);
+ assert.equal((await store.autoLink('ambiguous',{...data,operations:[debit,credit,{...credit,id:'duplicate'}]})).linked,0);
+ assert.equal((await store.autoLink('reverse',{...data,operations:[{...debit,bankDirection:'credit'},{...credit,bankDirection:'debit'}]})).linked,0);
+});

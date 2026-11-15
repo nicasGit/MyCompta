@@ -283,6 +283,10 @@ function createApp(store = new GoogleStore(), config = runtimeConfig()) {
     data.transferLinks = await transferLinks.read(base);
     res.json(buildReconciliation(data,start,end));
   });
+  app.post('/api/transfer-links/auto', async(req,res)=>res.json(await serialize(async()=>{
+    const data=await store.read(), {base}=await store.context();
+    return transferLinks.autoLink(base,data);
+  })));
   app.post('/api/transfer-links', async(req,res) => res.json(await serialize(async()=>{
     const data=await store.read(), {base}=await store.context();
     return transferLinks.link(base,data.operations,req.body.debitId,req.body.creditId);

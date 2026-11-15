@@ -178,3 +178,6 @@
 #view-distribution h3 { font-size:14px; }
 .category-total-caption { display:block; color:var(--muted); font-size:10px; font-weight:400; margin-bottom:4px; }
 #distribution-total>div { font-size:20px; font-weight:600; margin-top:8px; }
+tr[data-transfer-detail] { cursor:pointer; }
+tr[data-transfer-detail]:hover, tr[data-transfer-detail]:focus-visible { background:rgba(57,116,197,.08); }
+.transfer-detail-label { white-space:normal; min-width:180px; max-width:350px; overflow-wrap:anywhere; }
