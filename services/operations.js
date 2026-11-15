@@ -1,4 +1,4 @@
-const CATEGORIES = ['À catégoriser', 'Logement', 'Alimentation', 'Transports', 'Santé', 'Assurances', 'Loisirs', 'Abonnements', 'Impôts', 'Autres'];
+const CATEGORIES = ['À catégoriser', 'Logement', 'Alimentation', 'Transports', 'Santé', 'Assurances', 'Loisirs', 'Abonnements', 'Impôts', 'Autres', 'Virements'];
 function validateOperation(input, categories = CATEGORIES) {
   const fail = message => { throw Object.assign(new Error(message), { status: 400 }); };
   if (!input || typeof input !== 'object') fail('Opération invalide.');
@@ -17,7 +17,7 @@ function validateOperation(input, categories = CATEGORIES) {
   if (cardLast4 && !/^\d{4}$/.test(cardLast4)) fail('La carte doit être identifiée par ses quatre derniers chiffres.');
   if (!Number.isInteger(page) || page < 0 || page > 100000) fail('Page invalide.');
   return { date, label, amount: Math.round(input.amount * 100) / 100, currency: input.currency,
-    category: input.category, type: input.type, status: input.status === 'ignored' ? 'ignored' : 'validated', account: String(input.account || '').slice(0, 100),
+    category: input.type === 'transfer' && input.category === CATEGORIES[0] ? 'Virements' : input.category, type: input.type, status: input.status === 'ignored' ? 'ignored' : 'validated', account: String(input.account || '').slice(0, 100),
     holder: String(input.holder || '').trim().slice(0, 150), cardLast4, cardType: String(input.cardType || '').trim().slice(0, 40),
     createdBy: String(input.createdBy || '').slice(0, 254),
     bankDirection: ['debit','credit'].includes(input.bankDirection) ? input.bankDirection : '',

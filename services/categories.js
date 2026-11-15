@@ -16,6 +16,7 @@ function categoryNames(rows = []) {
     const name = parent ? `${parent} › ${leaf}` : leaf;
     if (!seen.has(key(name))) { names.push(name); seen.add(key(name)); }
   }
+  if (!seen.has(key('Virements'))) names.push('Virements');
   return names;
 }
 module.exports = { categoryNames, validateCategory, categoryKey: key };

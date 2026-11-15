@@ -261,3 +261,14 @@ test('HTTP flow: upload, deduplication, corrections, budgets and cross-origin pr
   response = await fetch(base + '/auth/callback?state=evil&code=evil', { redirect: 'manual' });
   assert.equal(response.headers.get('location'), '/?error=oauth');
 });
+
+test('uncategorized transfers get an automatic category without changing amounts or manual categories', () => {
+  const { categoryNames } = require('../services/categories');
+  const allowed = categoryNames([{ name: '\u00c0 cat\u00e9goriser' }]);
+  assert.ok(allowed.includes('Virements'));
+  const transfer = validateOperation(operation({ type:'transfer', category:'\u00c0 cat\u00e9goriser' }), allowed);
+  assert.equal(transfer.category, 'Virements');
+  assert.equal(transfer.amount, 12.35);
+  assert.equal(validateOperation(operation({ type:'transfer', category:'Logement' })).category, 'Logement');
+  assert.equal(validateOperation(operation({ category:'\u00c0 cat\u00e9goriser' })).category, '\u00c0 cat\u00e9goriser');
+});
