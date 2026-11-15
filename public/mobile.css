@@ -171,3 +171,4 @@
 .operation-filters select { width:100%; min-height:44px; }
 .operation-filters .operation-display-label { flex:1 1 270px; min-width:0; max-width:100%; }
 .operation-display-label select { text-overflow:ellipsis; }
+#back-to-dashboard { margin-bottom:18px; white-space:normal; }

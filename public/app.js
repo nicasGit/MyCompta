@@ -128,6 +128,7 @@ async function action(fn, success) {
   }
 }
 function showView(view) {
+  if (view !== 'operations') state.dashboardReturn = null;
   state.view = view;
   Object.keys(titles).forEach(key => { $(`#view-${key}`).hidden = key !== view; });
   document.querySelectorAll('.nav').forEach(button => button.classList.toggle('active', button.dataset.view === view));
@@ -267,6 +268,8 @@ document.addEventListener('click', event => {
   }
   const categoryRow = event.target.closest('[data-budget-category]');
   if (categoryRow) {
+    state.dashboardReturn = state.view === 'dashboard' ? { month:$('#month').value, mode:$('#period-mode').value, scrollY:window.scrollY } : null;
+    $('#operation-display-filter').value = 'all';
     $('#holder-filter').value = '';
     state.categoryFilter = { category: categoryRow.dataset.budgetCategory, currency: categoryRow.dataset.currency, expensesOnly: true };
     $('#search').value = '';
@@ -316,6 +319,16 @@ document.addEventListener('click', event => {
 $('#import-shortcut').onclick = () => { showView('documents'); $('#upload-form select').focus(); };
 $('#month').onchange = () => { if ($('#month').value) render(); };
 $('#period-mode').onchange = () => render();
+$('#back-to-dashboard').onclick = () => {
+  const origin = state.dashboardReturn;
+  if (!origin) return;
+  $('#month').value = origin.month;
+  $('#period-mode').value = origin.mode;
+  state.categoryFilter = null;
+  showView('dashboard');
+  render();
+  window.scrollTo({ top:origin.scrollY, behavior:'instant' });
+};
 $('#search').oninput = renderOperations;
 $('#holder-filter').onchange = renderOperations;
 $('#operation-display-filter').onchange = renderOperations;
@@ -367,6 +380,7 @@ operationScrollbar.onscroll=()=>{operationList.scrollLeft=operationScrollbar.scr
 operationList.onscroll=()=>{operationScrollbar.scrollLeft=operationList.scrollLeft;};
 new ResizeObserver(updateOperationScrollbar).observe(operationList);
 function renderOperations() {
+  $('#back-to-dashboard').hidden = !state.dashboardReturn;
   const month = selectedPeriod();
   const search = $('#search').value.toLocaleLowerCase('fr');
   const allForPeriod = state.data.operations.filter(o => !o.isSavings && MyComptaPeriod.matches(o.date, month)).sort((a, b) => b.date.localeCompare(a.date));
