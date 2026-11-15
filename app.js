@@ -12,6 +12,7 @@ const bankSource=source=>['UBS','PostFinance'].includes(source);
 const {ImportInbox}=require('./services/import-inbox');
 const {detectSource}=require('./services/detect-source');
 const {buildReconciliation}=require('./services/bank-reconciliation');
+const {TransferLinks}=require('./services/transfer-links');
 const { exec } = require("child_process");
 const { runtimeConfig } = require('./services/config');
 const { Household } = require('./services/household');
@@ -21,6 +22,7 @@ try { process.loadEnvFile(path.join(__dirname, '.env')); } catch (error) { if (e
 function createApp(store = new GoogleStore(), config = runtimeConfig()) {
   const app = express();
   const inbox=new ImportInbox(store.directory?path.join(store.directory,"import-inbox"):null);
+  const transferLinks = new TransferLinks(store.directory ? path.join(store.directory,'transfer-links') : null);
   const origin = config.origin;
   const household = config.multiUser ? new Household(store, config.ownerEmail) : null;
   const cookie = (req, name) => req.headers.cookie?.split(';').map(v => v.trim()).find(v => v.startsWith(name + '='))?.slice(name.length + 1);
@@ -277,8 +279,17 @@ function createApp(store = new GoogleStore(), config = runtimeConfig()) {
   app.get('/api/reconciliation',async(req,res)=>{
     const start=String(req.query.start||''),end=String(req.query.end||'');
     if(!/^\d{4}-(0[1-9]|1[0-2])$/.test(start)||!/^\d{4}-(0[1-9]|1[0-2])$/.test(end)||start>end)return res.status(400).json({error:'Période de rapprochement invalide.'});
-    res.json(buildReconciliation(await store.read(),start,end));
+    const data = await store.read(), {base} = await store.context();
+    data.transferLinks = await transferLinks.read(base);
+    res.json(buildReconciliation(data,start,end));
   });
+  app.post('/api/transfer-links', async(req,res) => res.json(await serialize(async()=>{
+    const data=await store.read(), {base}=await store.context();
+    return transferLinks.link(base,data.operations,req.body.debitId,req.body.creditId);
+  })));
+  app.delete('/api/transfer-links/:id', async(req,res) => res.json(await serialize(async()=>{
+    const {base}=await store.context(); await transferLinks.unlink(base,req.params.id); return {ok:true};
+  })));
   app.post('/api/categorize/preview', async (req, res) => res.json({ matches: await store.previewCategorization(req.body?.reclassify === true) }));
   app.post('/api/categorize/confirm', async (req, res) => res.json(await serialize(() => store.confirmCategorization(req.body.items, req.body.reclassify === true))));
   app.post('/api/categorize', async (req, res) => res.json(await serialize(() => store.categorizeOperations())));

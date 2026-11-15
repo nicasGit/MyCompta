@@ -182,7 +182,7 @@ test('provided UBS monthly and annual PDFs match their printed debit and credit 
   assert.ok(monthly.operations.every(o=>o.account===monthly.accountId&&o.holder));
   assert.throws(()=>parseUBSPages([]),error=>error.status===422);
   const data={documents:[],operations:[],accounts:[],suppliers:[],categories:[],budgets:[]};let uploads=0;
-  const store={status:async()=>({connected:true,ready:true}),read:async()=>structuredClone(data),
+  const store={status:async()=>({connected:true,ready:true}),context:async()=>({base:'https://sheets.example/bank-test'}),read:async()=>structuredClone(data),
     uploadPdf:async()=>({id:'pdf-'+(++uploads)}),renamePdf:async()=>{},
     appendImport:async(doc,rows)=>{data.documents.push(doc);data.operations.push(...rows);},
     saveAccount:async value=>value};

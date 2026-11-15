@@ -2,10 +2,16 @@ const cents=operation=>Math.round(operation.amount*100);
 function buildReconciliation(data,start,end){
   const documents=data.documents||[],all=(data.operations||[]).filter(operation=>operation.status!=='ignored');
   const included=date=>date&&date.slice(0,7)>=start&&date.slice(0,7)<=end;
-  const transfers=all.filter(operation=>operation.type==='transfer'&&included(operation.date));
+  const linked = [];
+  for (const link of data.transferLinks || []) {
+    try { const pair=require('./transfer-links').validatePair(all,link.debitId,link.creditId); linked.push({...link,...pair}); } catch {}
+  }
+  const linkedIds = new Set(linked.flatMap(pair=>[pair.debit.id,pair.credit.id]));
+  const available = all.filter(operation=>!linkedIds.has(operation.id));
+  const transfers=available.filter(operation=>operation.type==='transfer'&&included(operation.date));
   const candidateMap=new Map();
   for(const operation of transfers){
-    const candidates=all.filter(other=>other.type==='transfer'&&other.id!==operation.id&&other.account!==operation.account&&other.currency===operation.currency
+    const candidates=available.filter(other=>other.type==='transfer'&&other.id!==operation.id&&other.account!==operation.account&&other.currency===operation.currency
       &&cents(other)===cents(operation)&&operation.bankDirection&&other.bankDirection&&other.bankDirection!==operation.bankDirection
       &&Math.abs(Date.parse(operation.date)-Date.parse(other.date))<=5*86400000);
     candidateMap.set(operation.id,candidates);
@@ -15,7 +21,7 @@ function buildReconciliation(data,start,end){
     if(consumed.has(operation.id))continue;
     const candidates=candidateMap.get(operation.id),other=candidates[0];
     // Only a unique match in both directions is proposed; never reuse a movement.
-    const reciprocal=other?all.filter(item=>item.type==='transfer'&&item.id!==other.id&&item.account!==other.account&&item.currency===other.currency&&cents(item)===cents(other)
+    const reciprocal=other?available.filter(item=>item.type==='transfer'&&item.id!==other.id&&item.account!==other.account&&item.currency===other.currency&&cents(item)===cents(other)
       &&item.bankDirection&&item.bankDirection!==other.bankDirection&&Math.abs(Date.parse(item.date)-Date.parse(other.date))<=5*86400000):[];
     if(candidates.length===1&&reciprocal.length===1&&!consumed.has(other.id)){pairs.push({debit:operation.bankDirection==='debit'?operation:other,credit:operation.bankDirection==='credit'?operation:other});consumed.add(operation.id);consumed.add(other.id);}
     else unmatched.push({...operation,candidateCount:candidates.length});
@@ -40,6 +46,6 @@ function buildReconciliation(data,start,end){
     return {id:document.id,name:document.name,account:document.accountId,currency:all.find(operation=>operation.account===document.accountId)?.currency||(data.accounts||[]).find(account=>account.id===document.accountId)?.currency||'CHF',periodStart:document.periodStart,periodEnd:document.periodEnd,report,monthlyCount:monthly.length,missingMonths,
       monthlyDebit:monthlyDebit/100,monthlyCredit:monthlyCredit/100};
   });
-  return {pairs,unmatched,cards,annual};
+  return {pairs,unmatched,cards,annual,linked:linked.filter(pair=>included(pair.debit.date)||included(pair.credit.date))};
 }
 module.exports={buildReconciliation};

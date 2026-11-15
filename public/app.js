@@ -451,7 +451,11 @@ function render() {
     const [category, currency] = JSON.parse(key);
     return `<button type="button" class="category-row category-drilldown" data-budget-category="${esc(category)}" data-currency="${esc(currency)}" aria-label="Voir les dépenses ${esc(category)} en ${esc(currency)}"><div><span>${esc(category)} →</span><strong>${esc(money(cents / 100, currency))}</strong></div><progress value="${cents}" max="${totals[currency]}" aria-label="${esc(category)}"></progress></button>`;
   }).join('') || empty('Un premier relevé, une première vue', 'Importez des opérations pour voir leur répartition.');
+  $('#distribution-total').innerHTML = '<strong>Total des dépenses</strong><div>' + (Object.entries(totals).map(([currency,cents]) => esc(money(cents/100,currency))).join(' · ') || 'Aucune dépense sur cette période') + '</div>';
   $('#distribution-expenses').innerHTML = $('#category-chart').innerHTML;
+  $('#distribution-expenses').querySelectorAll('.category-drilldown strong').forEach(amount => {
+    const label=document.createElement('small'); label.className='category-total-caption'; label.textContent='Total de la catégorie'; amount.prepend(label);
+  });
   const incomeTotals = {};
   for (const operation of state.data.operations) {
     if (operation.isSavings || operation.status === 'ignored' || operation.type !== 'income' || !MyComptaPeriod.matches(operation.date, selectedPeriod())) continue;

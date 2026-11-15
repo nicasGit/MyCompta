@@ -176,3 +176,5 @@
 .income-row { background:rgba(53,154,108,.08); padding:14px; border-radius:8px; }
 #view-distribution .category-row>div { gap:12px; flex-wrap:wrap; }
 #view-distribution h3 { font-size:14px; }
+.category-total-caption { display:block; color:var(--muted); font-size:10px; font-weight:400; margin-bottom:4px; }
+#distribution-total>div { font-size:20px; font-weight:600; margin-top:8px; }
