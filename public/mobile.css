@@ -159,3 +159,7 @@
   #review-list .operation-table td.category-action { grid-column:1/-1; position:static; background:transparent; box-shadow:none; }
   #review-list [data-quick-category] { width:100%; min-height:44px; margin:4px 0 0; }
 }
+#quick-category-create { margin:16px 0; padding:12px 0; border-top:1px solid var(--border); border-bottom:1px solid var(--border); }
+#quick-category-create summary { min-height:36px; }
+#quick-category-form { display:grid; gap:12px; margin-top:12px; }
+#quick-category-feedback { font-size:12px; overflow-wrap:anywhere; }

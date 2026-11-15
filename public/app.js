@@ -155,9 +155,34 @@ function openCategoryMenu(id) {
   $('#category-menu-label').textContent = operation.label;
   $('#category-rule-filter').value = operation.label.slice(0, 120);
   $('#category-rule-error').hidden = true;
-  $('#category-menu-options').innerHTML = categories.filter(category => category !== 'À catégoriser').map(category => `<button type="button" class="secondary" data-assign-category="${esc(category)}">${esc(category)}</button>`).join('');
+  renderQuickCategories();
+  $('#quick-category-form').reset();
+  $('#quick-category-create').open = false;
+  $('#quick-category-feedback').hidden = true;
   if(!dialog.open)dialog.showModal();
 }
+function renderQuickCategories() {
+  $('#category-menu-options').innerHTML = categories.filter(category => category !== 'À catégoriser').map(category => `<button type="button" class="secondary" data-assign-category="${esc(category)}">${esc(category)}</button>`).join('');
+  $('#quick-category-parent').innerHTML = '<option value="">Aucune — catégorie principale</option>' + options(categories.filter(name => name !== 'À catégoriser' && !name.includes(' › ')));
+}
+$('#quick-category-form').onsubmit = event => {
+  event.preventDefault();
+  if (state.busy || !requireStorage()) return;
+  const form = event.target, feedback = $('#quick-category-feedback');
+  const name = form.elements.name.value.trim(), parent = $('#quick-category-parent').value;
+  return action(async () => {
+    try {
+      await api('/api/categories', { method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({name,parent}) });
+      await load();
+      renderQuickCategories();
+      form.reset();
+      feedback.textContent = 'Catégorie créée. Choisissez-la dans la liste ci-dessous pour cette opération.';
+    } catch (error) {
+      feedback.textContent = error.message;
+    }
+    feedback.hidden = false;
+  });
+};
 for(const target of ['#review-list','#operations-list'])$(target).addEventListener('contextmenu', event => {
   const row = event.target.closest('[data-operation-id]');
   if (!row) return;
