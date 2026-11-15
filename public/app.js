@@ -404,7 +404,7 @@ function render() {
   MyComptaAnnual.render(state.data.operations);
   renderCoverage();
   if (state.data.categories?.length) categories = state.data.categories;
-  $('#operation-category-filter').innerHTML = '<option value="">Toutes les catégories</option>' + options(categories);
+  $('#operation-category-filter').innerHTML = '<option value="">Toutes les catégories</option>' + options([...categories].sort((a,b) => a.localeCompare(b,'fr')));
   for (const id of ['operation-category', 'budget-category', 'supplier-category']) {
     const select = $('#' + id), previous = select.value;
     select.innerHTML = options(id === 'operation-category' ? categories : categories.filter(c => c !== 'À catégoriser'));
