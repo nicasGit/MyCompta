@@ -181,3 +181,4 @@
 tr[data-transfer-detail] { cursor:pointer; }
 tr[data-transfer-detail]:hover, tr[data-transfer-detail]:focus-visible { background:rgba(57,116,197,.08); }
 .transfer-detail-label { white-space:normal; min-width:180px; max-width:350px; overflow-wrap:anywhere; }
+.coverage-group-title { grid-column:1/-1; font-size:14px; margin:16px 0 4px; }

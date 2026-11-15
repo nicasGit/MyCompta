@@ -32,26 +32,48 @@ document.addEventListener('change', event => {
   }, 'Mois du relevé enregistré. Le suivi mensuel est actualisé.');
 });
 function renderCoverage() {
-  if (!state.demo && (!state.status.connected || !state.status.ready)) {
-    $('#coverage-summary').textContent = 'Connectez votre espace Google pour vérifier les relevés disponibles.';
-    $('#coverage-grid').innerHTML = '';
-    $('#coverage-unknown').textContent = '';
-    return;
-  }
   const source = $('#coverage-source').value, start = $('#coverage-start').value, end = $('#coverage-end').value;
   const previousAccount=$('#coverage-account').value;
-  const accounts=[...new Set(state.data.documents.filter(document=>document.source===source&&document.accountId).map(document=>document.accountId))];
-  $('#coverage-account').innerHTML=accounts.map(account=>`<option value="${esc(account)}">${esc(accountName(account))}</option>`).join('');
+  const sources=[...new Set(['Cembra','UBS','PostFinance','TopCard','Autre',...state.data.documents.map(document=>document.source)])];
+  $('#coverage-source').innerHTML='<option value="">Tous les établissements</option>'+options(sources);
+  $('#coverage-source').value=source;
+  const sourceDocuments=state.data.documents.filter(document=>!source||document.source===source);
+  const accounts=[...new Set(sourceDocuments.map(document=>document.accountId).filter(Boolean))];
+  $('#coverage-account').innerHTML='<option value="">Tous les comptes</option>'+accounts.map(account=>`<option value="${esc(account)}">${esc(accountName(account))}</option>`).join('');
   if(accounts.includes(previousAccount))$('#coverage-account').value=previousAccount;
-  $('#coverage-account-label').hidden=!['UBS','PostFinance'].includes(source);
-  const relevantDocuments=state.data.documents.filter(document=>!['UBS','PostFinance'].includes(source)||!$('#coverage-account').value||document.accountId===$('#coverage-account').value);
-  const span = (Number(end.slice(0, 4)) - Number(start.slice(0, 4))) * 12 + Number(end.slice(5)) - Number(start.slice(5));
-  const valid = MyComptaDocumentMonths.valid(start) && MyComptaDocumentMonths.valid(end) && start <= end && span < 120;
-  const months = valid ? MyComptaDocumentMonths.coverage(relevantDocuments, source, start, end) : [];
-  const unknown = relevantDocuments.filter(document => document.source === source && document.statementKind!=='annual' && !MyComptaDocumentMonths.month(document)).length;
-  $('#coverage-summary').textContent = valid ? `${months.filter(item => item.count > 0).length}/${months.length} mois présents · ${months.filter(item => !item.count).length} mois manquant(s) pour ${source}` : 'Choisissez une période valide de 10 ans maximum.';
-  $('#coverage-grid').innerHTML = months.map(item => `<div class="coverage-month ${item.count ? 'present' : 'missing'}"><strong>${esc(new Intl.DateTimeFormat('fr-CH', { month: 'long', year: 'numeric' }).format(new Date(Number(item.month.slice(0, 4)), Number(item.month.slice(5)) - 1, 1)))}</strong><span>${item.count ? `✓ ${item.count} PDF` : 'Manquant'}</span></div>`).join('');
-  $('#coverage-unknown').textContent = unknown ? `${unknown} PDF de ${source} sans mois identifié : renseignez leur mois ci-dessous avant de conclure qu’un relevé manque.` : 'Tous les documents de cet établissement ont un mois identifié.';
+  $('#coverage-account-label').hidden=!accounts.length;
+  const relevantDocuments=sourceDocuments.filter(document=>!$('#coverage-account').value||document.accountId===$('#coverage-account').value);
+  const span=(Number(end.slice(0,4))-Number(start.slice(0,4)))*12+Number(end.slice(5))-Number(start.slice(5));
+  const valid=MyComptaDocumentMonths.valid(start)&&MyComptaDocumentMonths.valid(end)&&start<=end&&span<120;
+  const visible=relevantDocuments.filter(document=>{
+    if(!valid)return true;
+    if(document.statementKind==='annual'&&document.periodStart&&document.periodEnd)return document.periodStart.slice(0,7)<=end&&document.periodEnd.slice(0,7)>=start;
+    const month=MyComptaDocumentMonths.month(document);
+    return !month||(month>=start&&month<=end);
+  });
+  $('#documents-list').innerHTML=docRows(visible);
+  $('#document-count').textContent=`${visible.length} / ${state.data.documents.length} document(s)`;
+  if(!state.demo&&(!state.status.connected||!state.status.ready)){
+    $('#coverage-summary').textContent='Connectez votre espace Google pour vérifier les relevés disponibles.';
+    $('#coverage-grid').innerHTML='';$('#coverage-unknown').textContent='';return;
+  }
+  const groups=new Map();
+  for(const document of relevantDocuments){
+    const account=['UBS','PostFinance'].includes(document.source)?document.accountId||'':'';
+    const key=JSON.stringify([document.source,account]);
+    if(!groups.has(key))groups.set(key,{source:document.source,account,documents:[]});
+    groups.get(key).documents.push(document);
+  }
+  if(!groups.size&&source)groups.set(source,{source,account:'',documents:[]});
+  let present=0,expected=0;
+  $('#coverage-grid').innerHTML=valid?[...groups.values()].map(group=>{
+    const months=MyComptaDocumentMonths.coverage(group.documents,group.source,start,end);
+    present+=months.filter(item=>item.count).length;expected+=months.length;
+    return `<h3 class="coverage-group-title">${esc(group.source)}${group.account?' · '+esc(accountName(group.account)):''}</h3>`+months.map(item=>`<div class="coverage-month ${item.count?'present':'missing'}"><strong>${esc(new Intl.DateTimeFormat('fr-CH',{month:'long',year:'numeric'}).format(new Date(Number(item.month.slice(0,4)),Number(item.month.slice(5))-1,1)))}</strong><span>${item.count?'✓ '+item.count+' PDF':'Manquant'}</span></div>`).join('');
+  }).join(''):'';
+  const unknown=relevantDocuments.filter(document=>document.statementKind!=='annual'&&!MyComptaDocumentMonths.month(document)).length;
+  $('#coverage-summary').textContent=valid?`${present}/${expected} mois présents · ${expected-present} mois manquant(s), par établissement et compte.`:'Choisissez une période valide de 10 ans maximum.';
+  $('#coverage-unknown').textContent=unknown?`${unknown} PDF sans mois identifié, conservé(s) dans la liste pour correction.`:'Tous les documents sélectionnés ont un mois identifié.';
 }
 $('#period-mode option[value="year"]').textContent = `Année en cours (${new Date().getFullYear()})`;
 const selectedPeriod = () => MyComptaPeriod.prefix($('#period-mode').value, $('#month').value);
@@ -463,8 +485,7 @@ function render() {
   }
   $('#distribution-income').innerHTML = Object.entries(incomeTotals).sort(([a],[b]) => a.localeCompare(b)).map(([currency,cents]) => `<button type="button" class="category-row category-drilldown income-row" data-budget-income data-currency="${esc(currency)}"><div><span>Revenus →</span><strong>${esc(money(cents/100,currency))}</strong></div></button>`).join('') || '<div class="category-row income-row"><div><strong>Revenus</strong><span>Aucun revenu sur cette période</span></div></div>';
   $('#recent-documents').innerHTML = docRows(state.data.documents.slice(-3), true);
-  $('#documents-list').innerHTML = docRows(state.data.documents);
-  $('#document-count').textContent = `${state.data.documents.length} document(s)`;
+
   renderOperations();
   const budgets = state.data.budgets.filter(b => b.month === $('#month').value);
   $('#budget-list').innerHTML = budgets.map(b => {
