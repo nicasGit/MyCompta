@@ -162,7 +162,14 @@ function openCategoryMenu(id) {
   if(!dialog.open)dialog.showModal();
 }
 function renderQuickCategories() {
-  $('#category-menu-options').innerHTML = categories.filter(category => category !== 'À catégoriser').map(category => `<button type="button" class="secondary" data-assign-category="${esc(category)}">${esc(category)}</button>`).join('');
+  const usage = new Map();
+  for (const operation of state.data.operations) {
+    if (operation.status === 'ignored' || operation.isSavings || !['expense','income'].includes(operation.type)) continue;
+    usage.set(operation.category, (usage.get(operation.category) || 0) + 1);
+  }
+  const rankedCategories = categories.filter(category => category !== 'À catégoriser')
+    .sort((a,b) => (usage.get(b) || 0) - (usage.get(a) || 0) || a.localeCompare(b, 'fr'));
+  $('#category-menu-options').innerHTML = rankedCategories.map(category => `<button type="button" class="secondary" data-assign-category="${esc(category)}">${esc(category)}</button>`).join('');
   $('#quick-category-parent').innerHTML = '<option value="">Aucune — catégorie principale</option>' + options(categories.filter(name => name !== 'À catégoriser' && !name.includes(' › ')));
 }
 $('#quick-category-form').onsubmit = event => {
