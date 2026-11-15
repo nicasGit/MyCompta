@@ -169,7 +169,9 @@ function renderQuickCategories() {
   }
   const rankedCategories = categories.filter(category => category !== 'À catégoriser')
     .sort((a,b) => (usage.get(b) || 0) - (usage.get(a) || 0) || a.localeCompare(b, 'fr'));
-  $('#category-menu-options').innerHTML = rankedCategories.map(category => `<button type="button" class="secondary" data-assign-category="${esc(category)}">${esc(category)}</button>`).join('');
+  const categoryButtons = names => names.map(category => `<button type="button" class="secondary" data-assign-category="${esc(category)}">${esc(category)}</button>`).join('');
+  $('#category-popular-options').innerHTML = categoryButtons(rankedCategories.slice(0,6));
+  $('#category-menu-options').innerHTML = categoryButtons([...rankedCategories].sort((a,b) => a.localeCompare(b,'fr')));
   $('#quick-category-parent').innerHTML = '<option value="">Aucune — catégorie principale</option>' + options(categories.filter(name => name !== 'À catégoriser' && !name.includes(' › ')));
 }
 $('#quick-category-form').onsubmit = event => {
