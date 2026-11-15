@@ -363,7 +363,7 @@ class GoogleStore {
     return { updated: changes.length };
   }
   async appendImport(document, operations) {
-    operations = operations.map(o => o.type === 'transfer' && o.category === CATEGORIES[0] ? { ...o, category: 'Virements' } : o);
+    operations = operations.map(o => ['transfer','card_payment'].includes(o.type) && o.category === CATEGORIES[0] ? { ...o, category: 'Virements' } : o);
     const { base } = await this.context();
     const metadata = await this.request(base + '?fields=sheets.properties');
     const id = name => metadata.sheets.find(s => s.properties.title === name).properties.sheetId;

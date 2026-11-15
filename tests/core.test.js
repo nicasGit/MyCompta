@@ -269,6 +269,10 @@ test('uncategorized transfers get an automatic category without changing amounts
   const transfer = validateOperation(operation({ type:'transfer', category:'\u00c0 cat\u00e9goriser' }), allowed);
   assert.equal(transfer.category, 'Virements');
   assert.equal(transfer.amount, 12.35);
+  const cardPayment = validateOperation(operation({ type:'card_payment', category:'\u00c0 cat\u00e9goriser' }), allowed);
+  assert.equal(cardPayment.category, 'Virements');
+  assert.equal(cardPayment.type, 'card_payment');
+  assert.equal(cardPayment.amount, 12.35);
   assert.equal(validateOperation(operation({ type:'transfer', category:'Logement' })).category, 'Logement');
   assert.equal(validateOperation(operation({ category:'\u00c0 cat\u00e9goriser' })).category, '\u00c0 cat\u00e9goriser');
 });
