@@ -8,6 +8,7 @@ const titles = { dashboard: ['Vue d’ensemble', 'Vos dépenses, avec un peu de 
 let categories = ['À catégoriser', 'Logement', 'Alimentation', 'Transports', 'Santé', 'Assurances', 'Loisirs', 'Abonnements', 'Impôts', 'Autres'];
 const labels = { pending: 'Incluse', validated: 'Incluse', ignored: 'Ignorée' };
 const typeLabels = { expense: 'Dépense', income: 'Revenu / remboursement', transfer: 'Virement', card_payment: 'Règlement de carte' };
+titles.distribution = ['Répartition du budget', 'Vos revenus et vos dépenses, catégorie par catégorie.'];
 titles.suppliers = ['Fournisseurs et catégories', 'Le bon classement, automatiquement.'];
 titles.household = ['Mon foyer', 'Un espace commun, une connexion pour chacun.'];
 titles.preferences = ['Paramètres', 'Une interface à votre goût.'];
@@ -134,12 +135,12 @@ function showView(view) {
   document.querySelectorAll('.nav').forEach(button => button.classList.toggle('active', button.dataset.view === view));
   $('#title').textContent = $('#breadcrumb').textContent = titles[view][0];
   $('#subtitle').textContent = titles[view][1];
-  $('#month-label').hidden = !['dashboard', 'operations', 'budgets','savings'].includes(view);
+  $('#month-label').hidden = !['dashboard', 'operations', 'budgets','savings','distribution'].includes(view);
   $('#holder-label').hidden = !['operations', 'review'].includes(view);
   $('#operation-category-label').hidden = view !== 'operations';
   $('#period-mode').hidden = view === 'budgets';
   $('#month').hidden = view !== 'budgets' && $('#period-mode').value === 'year';
-  $('#period-status').hidden = !['dashboard', 'operations', 'budgets','savings'].includes(view);
+  $('#period-status').hidden = !['dashboard', 'operations', 'budgets','savings','distribution'].includes(view);
   renderPeriodStatus();
   $('#import-shortcut').hidden = ['settings', 'documents', 'preferences', 'household'].includes(view);
   $('#onboarding').hidden = state.status.connected || state.demo || ['settings', 'preferences', 'household'].includes(view);
@@ -266,12 +267,12 @@ document.addEventListener('click', event => {
       await openCategorizationPreview(true);
     });
   }
-  const categoryRow = event.target.closest('[data-budget-category]');
+  const categoryRow = event.target.closest('[data-budget-category],[data-budget-income]');
   if (categoryRow) {
-    state.dashboardReturn = state.view === 'dashboard' ? { month:$('#month').value, mode:$('#period-mode').value, scrollY:window.scrollY } : null;
+    state.dashboardReturn = ['dashboard','distribution'].includes(state.view) ? { view:state.view, month:$('#month').value, mode:$('#period-mode').value, scrollY:window.scrollY } : null;
     $('#operation-display-filter').value = 'all';
     $('#holder-filter').value = '';
-    state.categoryFilter = { category: categoryRow.dataset.budgetCategory, currency: categoryRow.dataset.currency, expensesOnly: true };
+    state.categoryFilter = categoryRow.hasAttribute('data-budget-income') ? { incomeOnly:true, currency:categoryRow.dataset.currency } : { category: categoryRow.dataset.budgetCategory, currency: categoryRow.dataset.currency, expensesOnly: true };
     $('#search').value = '';
     showView('operations');
     renderOperations();
@@ -325,7 +326,7 @@ $('#back-to-dashboard').onclick = () => {
   $('#month').value = origin.month;
   $('#period-mode').value = origin.mode;
   state.categoryFilter = null;
-  showView('dashboard');
+  showView(origin.view || 'dashboard');
   render();
   window.scrollTo({ top:origin.scrollY, behavior:'instant' });
 };
@@ -381,6 +382,7 @@ operationList.onscroll=()=>{operationScrollbar.scrollLeft=operationList.scrollLe
 new ResizeObserver(updateOperationScrollbar).observe(operationList);
 function renderOperations() {
   $('#back-to-dashboard').hidden = !state.dashboardReturn;
+  $('#back-to-dashboard').textContent = state.dashboardReturn?.view === 'distribution' ? '← Retour à la répartition du budget' : '← Retour à la vue d’ensemble';
   const month = selectedPeriod();
   const search = $('#search').value.toLocaleLowerCase('fr');
   const allForPeriod = state.data.operations.filter(o => !o.isSavings && MyComptaPeriod.matches(o.date, month)).sort((a, b) => b.date.localeCompare(a.date));
@@ -391,9 +393,9 @@ function renderOperations() {
   });
   const selection = state.categoryFilter;
   $('#operation-category-filter').value = selection?.category || '';
-  const details = selection ? filtered.filter(o => categoryBelongsTo(o.category, selection.category) && (!selection.currency || o.currency === selection.currency) && (!selection.expensesOnly || (o.type === 'expense' && o.status !== 'ignored'))) : filtered;
+  const details = selection ? filtered.filter(o => (!selection.category || categoryBelongsTo(o.category, selection.category)) && (!selection.incomeOnly || (o.type === 'income' && o.status !== 'ignored')) && (!selection.currency || o.currency === selection.currency) && (!selection.expensesOnly || (o.type === 'expense' && o.status !== 'ignored'))) : filtered;
   $('#category-detail').hidden = !selection;
-  if (selection) $('#category-detail-label').textContent = `${selection.category} · ${details.length} opération(s)${selection.expensesOnly ? ' · Dépenses incluses uniquement' : ''}`;
+  if (selection) $('#category-detail-label').textContent = `${selection.incomeOnly ? "Revenus / remboursements" : selection.category} · ${details.length} opération(s)${selection.expensesOnly ? ' · Dépenses incluses uniquement' : ''}`;
   const visible = details.filter(o => `${o.label} ${o.account} ${o.holder || ""} ${o.cardLast4 || ""}`.toLocaleLowerCase('fr').includes(search));
   $('#operations-list').innerHTML = operationTable(visible);
   const totals = MyComptaOperationTotals.calculate(visible);
@@ -449,6 +451,13 @@ function render() {
     const [category, currency] = JSON.parse(key);
     return `<button type="button" class="category-row category-drilldown" data-budget-category="${esc(category)}" data-currency="${esc(currency)}" aria-label="Voir les dépenses ${esc(category)} en ${esc(currency)}"><div><span>${esc(category)} →</span><strong>${esc(money(cents / 100, currency))}</strong></div><progress value="${cents}" max="${totals[currency]}" aria-label="${esc(category)}"></progress></button>`;
   }).join('') || empty('Un premier relevé, une première vue', 'Importez des opérations pour voir leur répartition.');
+  $('#distribution-expenses').innerHTML = $('#category-chart').innerHTML;
+  const incomeTotals = {};
+  for (const operation of state.data.operations) {
+    if (operation.isSavings || operation.status === 'ignored' || operation.type !== 'income' || !MyComptaPeriod.matches(operation.date, selectedPeriod())) continue;
+    incomeTotals[operation.currency] = (incomeTotals[operation.currency] || 0) + Math.round(operation.amount * 100);
+  }
+  $('#distribution-income').innerHTML = Object.entries(incomeTotals).sort(([a],[b]) => a.localeCompare(b)).map(([currency,cents]) => `<button type="button" class="category-row category-drilldown income-row" data-budget-income data-currency="${esc(currency)}"><div><span>Revenus →</span><strong>${esc(money(cents/100,currency))}</strong></div></button>`).join('') || '<div class="category-row income-row"><div><strong>Revenus</strong><span>Aucun revenu sur cette période</span></div></div>';
   $('#recent-documents').innerHTML = docRows(state.data.documents.slice(-3), true);
   $('#documents-list').innerHTML = docRows(state.data.documents);
   $('#document-count').textContent = `${state.data.documents.length} document(s)`;
