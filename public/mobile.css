@@ -203,3 +203,6 @@ tr[data-transfer-detail]:hover, tr[data-transfer-detail]:focus-visible { backgro
 #balance-months tbody th { text-transform:none; color:var(--ink); letter-spacing:normal; padding:17px 10px; }
 #balance-months tfoot { background:rgba(57,116,197,.07); font-weight:600; }
 @media(max-width:720px) { .balance-stats { grid-template-columns:1fr; } .balance-stat { display:flex; flex-wrap:wrap; align-items:center; justify-content:space-between; gap:12px; } .balance-stat span { margin:0; } .balance-stat strong { font-size:22px; } }
+.operation-net { display:inline-block; padding:4px 8px; border-radius:5px; font-size:14px; }
+.operation-net.balance-positive { background:rgba(37,132,102,.10); }
+.operation-net.balance-negative { background:rgba(163,61,61,.09); }
