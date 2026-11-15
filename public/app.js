@@ -318,6 +318,7 @@ $('#month').onchange = () => { if ($('#month').value) render(); };
 $('#period-mode').onchange = () => render();
 $('#search').oninput = renderOperations;
 $('#holder-filter').onchange = renderOperations;
+$('#operation-display-filter').onchange = renderOperations;
 $('#operation-category-filter').onchange = () => {
   const category = $('#operation-category-filter').value;
   state.categoryFilter = category ? { category } : null;
@@ -369,7 +370,11 @@ function renderOperations() {
   const month = selectedPeriod();
   const search = $('#search').value.toLocaleLowerCase('fr');
   const allForPeriod = state.data.operations.filter(o => !o.isSavings && MyComptaPeriod.matches(o.date, month)).sort((a, b) => b.date.localeCompare(a.date));
-  const filtered = allForPeriod.filter(matchesHolder);
+  const display = $('#operation-display-filter').value;
+  const filtered = allForPeriod.filter(matchesHolder).filter(operation => {
+    const excluded = operation.status === 'ignored' || ['transfer','card_payment'].includes(operation.type);
+    return display === 'exclude' ? !excluded : display === 'only' ? excluded : true;
+  });
   const selection = state.categoryFilter;
   $('#operation-category-filter').value = selection?.category || '';
   const details = selection ? filtered.filter(o => categoryBelongsTo(o.category, selection.category) && (!selection.currency || o.currency === selection.currency) && (!selection.expensesOnly || (o.type === 'expense' && o.status !== 'ignored'))) : filtered;

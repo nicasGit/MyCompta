@@ -169,3 +169,5 @@
 .operation-filters .search-label { flex:1 1 250px; max-width:none; margin:0; }
 .operation-filters #operation-category-label { flex:1 1 220px; min-width:0; }
 .operation-filters select { width:100%; min-height:44px; }
+.operation-filters .operation-display-label { flex:1 1 270px; min-width:0; max-width:100%; }
+.operation-display-label select { text-overflow:ellipsis; }
