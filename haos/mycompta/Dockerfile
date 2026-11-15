@@ -2,7 +2,7 @@ FROM node:24-bookworm-slim AS source
 RUN apt-get update && apt-get install -y --no-install-recommends git ca-certificates && rm -rf /var/lib/apt/lists/*
 WORKDIR /src
 # Pin the application release without depending on the GitHub API.
-ARG MYCOMPTA_COMMIT=de8a035fadda4678ee97c3c214f9cf4cd3cc4bfb
+ARG MYCOMPTA_COMMIT=e0f43ab80a8bc7a77c6821d2668ff7633018c85a
 RUN git init . && git remote add origin https://github.com/nicasGit/MyCompta.git \
     && git fetch --depth 1 origin "${MYCOMPTA_COMMIT}" \
     && git checkout --detach FETCH_HEAD
