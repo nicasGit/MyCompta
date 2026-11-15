@@ -184,3 +184,22 @@ tr[data-transfer-detail] { cursor:pointer; }
 tr[data-transfer-detail]:hover, tr[data-transfer-detail]:focus-visible { background:rgba(57,116,197,.08); }
 .transfer-detail-label { white-space:normal; min-width:180px; max-width:350px; overflow-wrap:anywhere; }
 .coverage-group-title { grid-column:1/-1; font-size:14px; margin:16px 0 4px; }
+.balance-stats { display:grid; grid-template-columns:repeat(3,minmax(0,1fr)); gap:14px; margin:20px 0; }
+.balance-stat { border:1px solid var(--border); border-radius:10px; padding:18px; background:rgba(57,116,197,.04); }
+.balance-stat span { display:block; font-size:12px; color:var(--muted); margin-bottom:10px; }
+.balance-stat strong { font-size:24px; overflow-wrap:anywhere; }
+.balance-stat.income,.balance-stat.positive { background:rgba(37,132,102,.07); }
+.balance-stat.negative { background:rgba(170,65,65,.06); }
+.balance-legend { display:flex; flex-wrap:wrap; gap:20px; font-size:12px; margin:24px 0 10px; }
+.balance-legend span { display:flex; align-items:center; gap:8px; }
+.balance-legend i { width:12px; height:12px; border-radius:3px; }
+.balance-legend .income { background:#258466; }
+.balance-legend .expenses { background:#3974c5; }
+.balance-chart { width:100%; overflow-x:auto; }
+.balance-chart svg { display:block; width:100%; min-width:720px; font-size:11px; fill:var(--muted); }
+.balance-positive { color:#247b65; }
+.balance-negative { color:#a33d3d; }
+#balance-months caption { text-align:left; font-weight:600; padding:16px 0; }
+#balance-months tbody th { text-transform:none; color:var(--ink); letter-spacing:normal; padding:17px 10px; }
+#balance-months tfoot { background:rgba(57,116,197,.07); font-weight:600; }
+@media(max-width:720px) { .balance-stats { grid-template-columns:1fr; } .balance-stat { display:flex; flex-wrap:wrap; align-items:center; justify-content:space-between; gap:12px; } .balance-stat span { margin:0; } .balance-stat strong { font-size:22px; } }

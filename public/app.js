@@ -8,6 +8,7 @@ const titles = { dashboard: ['Vue d’ensemble', 'Vos dépenses, avec un peu de 
 let categories = ['À catégoriser', 'Logement', 'Alimentation', 'Transports', 'Santé', 'Assurances', 'Loisirs', 'Abonnements', 'Impôts', 'Autres'];
 const labels = { pending: 'Incluse', validated: 'Incluse', ignored: 'Ignorée' };
 const typeLabels = { expense: 'Dépense', income: 'Revenu / remboursement', transfer: 'Virement', card_payment: 'Règlement de carte' };
+titles.balance = ['Bilan', 'Recettes et dépenses : le bilan de votre année, mois par mois.'];
 titles.distribution = ['Répartition du budget', 'Vos revenus et vos dépenses, catégorie par catégorie.'];
 titles.suppliers = ['Fournisseurs et catégories', 'Le bon classement, automatiquement.'];
 titles.household = ['Mon foyer', 'Un espace commun, une connexion pour chacun.'];
@@ -445,6 +446,7 @@ function render() {
   $('#holder-filter').innerHTML = '<option value="">Tous les titulaires</option>' + holders.map(holder => `<option value="${esc('holder:' + holder)}">${esc(holder)}</option>`).join('') + '<option value="unknown">Non renseigné</option>';
   if ([...$('#holder-filter').options].some(option => option.value === previousHolder)) $('#holder-filter').value = previousHolder;
   MyComptaAnnual.render(state.data.operations);
+  MyComptaBalance.render(state.data.operations);
   renderCoverage();
   if (state.data.categories?.length) categories = state.data.categories;
   $('#operation-category-filter').innerHTML = '<option value="">Toutes les catégories</option>' + options([...categories].sort((a,b) => a.localeCompare(b,'fr')));
