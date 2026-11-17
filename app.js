@@ -297,6 +297,7 @@ function createApp(store = new GoogleStore(), config = runtimeConfig()) {
   app.post('/api/categorize/preview', async (req, res) => res.json({ matches: await store.previewCategorization(req.body?.reclassify === true) }));
   app.post('/api/categorize/confirm', async (req, res) => res.json(await serialize(() => store.confirmCategorization(req.body.items, req.body.reclassify === true))));
   app.post('/api/categorize', async (req, res) => res.json(await serialize(() => store.categorizeOperations())));
+  app.post('/share-pdf', (req,res)=>res.redirect(303,'/?share-error=unavailable'));
   app.use(express.static(path.join(__dirname, 'public'), { setHeaders(res, file) {
     if (/\.(?:html|js|css|webmanifest)$/.test(file)) res.setHeader('Cache-Control', 'no-cache');
   } }));

@@ -558,7 +558,7 @@ $('#upload-form').onsubmit = event => {
         $('#import-results').innerHTML = results.map(item => '<p class="banner' + (item.error ? ' import-error' : '') + '"><strong>' + esc(item.name) + '</strong><br>' + esc(item.error || (item.response.duplicate ? 'Relevé déjà importé (fichier ou données identiques) : aucun ajout.' : item.response.count + ' opération(s) importée(s). ' + (item.response.note || ''))) + '</p>').join('');
       });
     const failed = results.filter(item => item.error).length;
-    if (!failed) {form.reset();MyComptaWorkflows.clearFiles();}
+    if (!failed) {form.reset();MyComptaWorkflows.clearFiles();if(window.MyComptaSharedImport)await MyComptaSharedImport.clearImported(files);}
     if(failed)$('#import-results').insertAdjacentHTML('beforeend','<button class="secondary" data-view="importerrors">Voir les PDF en erreur et leurs diagnostics</button>');
     try { await load(); } catch (error) { message('Imports terminés. Actualisation impossible : ' + error.message, true); return; }
     message((files.length - failed) + '/' + files.length + ' fichier(s) traité(s). Consultez les résultats ci-dessous.', failed > 0);

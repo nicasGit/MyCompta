@@ -93,5 +93,5 @@
     $('#savings-results').innerHTML=totals+(movements.length?`<article class="panel"><h2>Détail des mouvements (${movements.length})</h2><p class="footnote">Les deux côtés d’un transfert peuvent apparaître ; les totaux ci-dessus utilisent uniquement le côté du compte épargne.</p><div class="table-wrap">${operationTable(movements)}</div></article>`:'<article class="panel"><p>Aucun mouvement épargne sur cette période. Marquez vos comptes dans Paramètres.</p></article>');
   }
   $('#savings-account').onchange=renderSavings;
-  window.MyComptaWorkflows={loadInbox,refreshInboxCount,renderSavings,files:()=>dropped.length?dropped:Array.from(input.files),clearFiles};
+  window.MyComptaWorkflows={loadInbox,refreshInboxCount,renderSavings,selectFiles:select,files:()=>dropped.length?dropped:Array.from(input.files),clearFiles};
 })();

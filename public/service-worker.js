@@ -1,8 +1,22 @@
+importScripts('/shared-files.js');
 // Online data only: never store household data, PDFs or Google responses in CacheStorage.
 self.addEventListener('install', () => self.skipWaiting());
 self.addEventListener('activate', event => event.waitUntil(self.clients.claim()));
 self.addEventListener('fetch', event => {
   const url = new URL(event.request.url);
+  if (event.request.method === 'POST' && url.origin === self.location.origin && url.pathname === '/share-pdf') {
+    event.respondWith((async()=>{
+      try {
+        const form=await event.request.formData();
+        const files=form.getAll('pdf');
+        const id=await MyComptaSharedFiles.save(files);
+        return Response.redirect(self.location.origin+'/?shared='+encodeURIComponent(id),303);
+      } catch {
+        return Response.redirect(self.location.origin+'/?share-error=invalid',303);
+      }
+    })());
+    return;
+  }
   if (event.request.method !== 'GET' || event.request.mode !== 'navigate'
     || url.origin !== self.location.origin || !['/', '/index.html'].includes(url.pathname)) return;
   event.respondWith(fetch(event.request).catch(() => new Response(`<!doctype html>
